@@ -1,0 +1,42 @@
+# Dependências
+node_modules/
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+!.env.example
+
+# Testes e cobertura
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Dados locais, exports e backups (nunca versionar)
+*.sqlite
+*.sqlite3
+*.db
+backups/
+exports/
+*.export.json
+*.backup.json
+
+# Sistema / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Logs
+*.log
+npm-debug.log*
