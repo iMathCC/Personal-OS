@@ -1,0 +1,13 @@
+name = "personal-os-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+[vars]
+APP_VERSION = "0.1.0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "personal-os"
+# ID local: o Miniflare usa um banco local e ignora este valor.
+database_id = "00000000-0000-0000-0000-000000000000"

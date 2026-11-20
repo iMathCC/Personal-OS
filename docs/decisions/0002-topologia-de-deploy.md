@@ -1,6 +1,6 @@
 # ADR-0002 — Worker único servindo SPA e API
 
-- **Status:** Proposto (requer aprovação)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** ADR-0001, ADR-0006
 

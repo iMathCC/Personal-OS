@@ -1,6 +1,6 @@
 # ADR-0010 — Exportação aberta e backups
 
-- **Status:** Proposto (requer aprovação)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** DATA_MODEL, SECURITY, ROADMAP
 

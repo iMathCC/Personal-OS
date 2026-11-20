@@ -1,0 +1,19 @@
+name = "personal-os"
+main = "src/index.ts"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+[vars]
+APP_VERSION = "0.1.0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "personal-os"
+# Substituir pelo ID real criado com `wrangler d1 create personal-os`.
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]

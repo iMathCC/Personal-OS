@@ -1,6 +1,6 @@
 # ADR-0011 — Domínio e `workers.dev`
 
-- **Status:** Pendente de aprovação humana (decisão D-03)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** ADR-0003, ARCHITECTURE §18
 

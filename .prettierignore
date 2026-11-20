@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+.wrangler
+package-lock.json
+docs
+README.md
+AGENTS.md
+*.md

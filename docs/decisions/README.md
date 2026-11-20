@@ -6,17 +6,17 @@ Cada ADR registra uma decisão estrutural, o contexto, as alternativas e as cons
 
 | ADR | Título | Status |
 | --- | --- | --- |
-| [0001](0001-stack-e-monorepo.md) | Stack inicial e monorepo | Aceito com ajustes |
-| [0002](0002-topologia-de-deploy.md) | Worker único servindo SPA e API | Proposto |
-| [0003](0003-autenticacao.md) | Autenticação por passkeys | Proposto |
-| [0004](0004-single-tenant.md) | Sistema single-tenant | Proposto |
+| [0001](0001-stack-e-monorepo.md) | Stack inicial e monorepo | Aceito |
+| [0002](0002-topologia-de-deploy.md) | Worker único servindo SPA e API | Aceito |
+| [0003](0003-autenticacao.md) | Autenticação por passkeys | Aceito |
+| [0004](0004-single-tenant.md) | Sistema single-tenant | Aceito |
 | [0005](0005-identidade-tempo-dinheiro.md) | Identidade, tempo e dinheiro | Proposto |
 | [0006](0006-contratos-de-api.md) | Contratos REST versionados | Proposto |
 | [0007](0007-auditoria-e-historico.md) | Auditoria append-only sem event sourcing | Proposto |
 | [0008](0008-agregacoes-e-limites-d1.md) | Agregações materializadas e limites do D1 | Proposto |
-| [0009](0009-ia-desacoplada.md) | IA desacoplada, opcional e com proveniência | Proposto |
-| [0010](0010-backup-e-exportacao.md) | Exportação aberta e backups | Proposto |
-| [0011](0011-dominio-e-workers-dev.md) | Domínio e `workers.dev` | Pendente |
+| [0009](0009-ia-desacoplada.md) | IA desacoplada, opcional e com proveniência | Aceito |
+| [0010](0010-backup-e-exportacao.md) | Exportação aberta e backups | Aceito |
+| [0011](0011-dominio-e-workers-dev.md) | Domínio e `workers.dev` | Aceito |
 
 ## Status possíveis
 

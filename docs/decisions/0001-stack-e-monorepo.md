@@ -1,6 +1,6 @@
 # ADR-0001 — Stack inicial e monorepo
 
-- **Status:** Aceito com ajustes (stack fornecida no briefing; ajustes propostos)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** ADR-0002, ADR-0008
 
@@ -12,13 +12,13 @@ O briefing define React + Vite + TypeScript, Tailwind + shadcn/ui, ECharts, Hono
 
 Adotar a stack proposta, com estes ajustes e fixações:
 
-- **Node 22 LTS** (Vite 7+ exige ≥ 20.19/22.12; o ambiente atual tem 18.19.1).
+- **Node 24 LTS** (D-15; Vite 8 exige Node ≥ 20.19/22.12 e o requisito foi fixado em 24).
 - **npm workspaces** para o monorepo (npm já disponível; evita nova ferramenta).
 - **Zod ≥ 4.5.0** (versões antigas usam memória excessiva no Workers, conforme documentação oficial).
 - **Tailwind CSS v4** + shadcn/ui (componentes copiados, não dependência de runtime).
 - **ECharts** com imports seletivos e carregamento lazy.
 - **Drizzle** com driver `d1`; migrações via `drizzle-kit` + `wrangler d1 migrations apply`.
-- **Vitest** + `@cloudflare/vitest-pool-workers` para testes; Playwright para E2E.
+- **Vitest** + `@cloudflare/vitest-plugin` para testes (substitui o antigo `@cloudflare/vitest-pool-workers`, descontinuado); Playwright para E2E.
 - Estrutura: `apps/web`, `apps/api`, `packages/shared`, `packages/domain`, `packages/db`.
 
 Dependências adicionais propostas (justificadas no ARCHITECTURE §14): `uuid` (v7), `@simplewebauthn/*`, `react-router`, `@tanstack/react-query`, `react-hook-form`, ESLint/Prettier.
@@ -37,10 +37,10 @@ Dependências adicionais propostas (justificadas no ARCHITECTURE §14): `uuid` (
 
 **Positivas:** stack madura, gratuita, tipada de ponta a ponta; testes no runtime real; portabilidade razoável.
 
-**Negativas/riscos:** Node 22 obrigatório; ECharts aumenta bundle se mal importado; Drizzle no D1 não tem transações interativas; shadcn exige manutenção dos componentes copiados.
+**Negativas/riscos:** Node 24 obrigatório; ECharts aumenta bundle se mal importado; Drizzle no D1 não tem transações interativas; shadcn exige manutenção dos componentes copiados.
 
 ## Critérios de revisão
 
 - Se o bundle inicial passar de 250 KB gzip de forma persistente.
-- Se o Node 22 não estiver disponível no ambiente de desenvolvimento/CI.
+- Se o Node 24 não estiver disponível no ambiente de desenvolvimento/CI.
 - Se uma dependência adicional relevante for necessária.

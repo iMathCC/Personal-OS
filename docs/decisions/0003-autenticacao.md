@@ -1,6 +1,6 @@
 # ADR-0003 — Autenticação por passkeys
 
-- **Status:** Proposto (requer aprovação — decisão D-01)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** ADR-0011, SECURITY.md
 

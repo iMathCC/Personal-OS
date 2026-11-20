@@ -1,6 +1,6 @@
 # ADR-0009 — IA desacoplada, opcional e com proveniência
 
-- **Status:** Proposto (requer aprovação)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** ADR-0008, SECURITY, PRODUCT_SPEC
 

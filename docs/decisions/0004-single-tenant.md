@@ -1,6 +1,6 @@
 # ADR-0004 — Sistema single-tenant
 
-- **Status:** Proposto (requer aprovação — decisão D-02)
+- **Status:** Aceito
 - **Data:** 2026-11-20
 - **Relacionados:** ADR-0003, DATA_MODEL
 

@@ -67,7 +67,7 @@ Aprovação humana das decisões da §8. Sem aprovação, a Fase 1 não inicia.
 ### 4.1 Entregáveis
 
 1. **Monorepo npm workspaces** com `apps/web`, `apps/api`, `packages/shared`, `packages/domain`, `packages/db`.
-2. **Tooling:** TypeScript estrito, ESLint, Prettier, Vitest, `.nvmrc` (Node 22), scripts raiz (`dev`, `build`, `test`, `typecheck`, `lint`).
+2. **Tooling:** TypeScript estrito, ESLint, Prettier, Vitest, `.nvmrc` (Node 24), scripts raiz (`dev`, `build`, `test`, `typecheck`, `lint`).
 3. **Worker + Hono** com:
    - `/api/v1/health`;
    - middleware de request ID, erros, headers de segurança, body limit;
@@ -291,9 +291,9 @@ Ordem sugerida (uma entrega por módulo, com aceite próprio):
 | D-12 | Moeda BRL única, sem câmbio | Aprovar | Fase 4 | Multi-moeda exige taxas e regras |
 | D-13 | Retenção de auditoria 12 meses | Aprovar | Fase 1 | Ajuste de job |
 | D-14 | Adoção de `@tanstack/react-query` e `react-hook-form` | Aprovar | Fase 2 | Mais código manual, mais bugs |
-| D-15 | Node 22 LTS como requisito | Aprovar (ambiente atual tem 18) | Fase 1 | Build falha com Vite atual |
+| D-15 | Node 24 LTS como requisito | Aprovado (alterado pelo usuário) | Fase 1 | Build falha com Vite atual |
 
-> D-15 é técnico e não deveria bloquear: Node 18 está fora do suporte da stack. Recomenda-se atualizar antes da Fase 1.
+> D-15 foi aprovada com alteração: **Node.js 24 LTS** (não 22). Fixado em `.nvmrc`, `engines.node` (`>=24 <25`) e CI.
 
 ---
 
@@ -302,7 +302,7 @@ Ordem sugerida (uma entrega por módulo, com aceite próprio):
 **Tarefa 1.1 — Bootstrap verificável do monorepo**
 
 1. Criar `package.json` raiz com workspaces e scripts (`dev`, `build`, `lint`, `typecheck`, `test`).
-2. Fixar Node 22 em `.nvmrc` e `engines`; configurar TypeScript estrito em `tsconfig.base.json`.
+2. Fixar Node 24 em `.nvmrc` e `engines`; configurar TypeScript estrito em `tsconfig.base.json`.
 3. Criar `apps/api` com Hono + `GET /api/v1/health` e `wrangler.toml` (D1 binding local).
 4. Criar `apps/web` com Vite + React + TS + Tailwind + shadcn/ui, shell mínimo e proxy `/api`.
 5. Criar `packages/shared` com o schema Zod do health check e o envelope de erro.

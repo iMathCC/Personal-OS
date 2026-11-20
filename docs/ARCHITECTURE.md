@@ -165,7 +165,7 @@ personal-os/
 ├── AGENTS.md
 ├── package.json                # npm workspaces
 ├── tsconfig.base.json
-├── .nvmrc                      # Node 22
+├── .nvmrc                      # Node 24
 └── README.md
 ```
 
@@ -288,7 +288,7 @@ Sem depender de produtos pagos:
 - **CI (GitHub Actions free):** instalar com `npm ci`, lint, typecheck, testes unitários, testes de integração com D1 local, build, verificação de bundle. Alvo < 5 min.
 - **CD:** `wrangler deploy` somente em `main` após CI verde; migrations em workflow separado com aprovação.
 - **Versionamento:** Conventional Commits; releases por tag; changelog manual no início.
-- **Node 22 LTS** obrigatório (Vite 7+ exige ≥ 20.19/22.12; ambiente atual tem 18.19.1). Fixar em `.nvmrc` e `engines`.
+- **Node 24 LTS** obrigatório (Vite 8 exige Node ≥ 20.19/22.12; o requisito foi fixado em 24 por decisão D-15). Fixar em `.nvmrc` e `engines`.
 
 ## 13. Compatibilidade da stack (verificada em 2026-11-20)
 
