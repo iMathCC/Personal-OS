@@ -5,7 +5,14 @@ import {
   type RegistrationResponseJSON,
 } from '@simplewebauthn/browser';
 import {
+  type AreaDto,
+  type CourseDto,
+  type CreateCourseRequest,
+  type CreateStudySessionRequest,
+  type ObservationDto,
+  type SeriesQuery,
   type SessionDto,
+  type StudySessionDto,
   type UserDto,
   healthResponseSchema,
   type HealthResponse,
@@ -46,7 +53,9 @@ export function subscribeToUnauthorized(listener: UnauthorizedListener): () => v
 function isProtectedPath(path: string): boolean {
   if (path === '/auth/me' || path === '/auth/sessions') return true;
   if (path === '/auth/logout' || path === '/auth/logout-all') return true;
-  return path.startsWith('/auth/sessions/');
+  if (path.startsWith('/auth/sessions/')) return true;
+  // Estudos é autenticado: um 401 aqui também encerra a sessão local.
+  return path.startsWith('/studies/');
 }
 
 function notifyUnauthorized(path: string, status: number): void {
@@ -217,6 +226,60 @@ export const authApi = {
     credential: RegistrationResponseJSON;
     passkeyName: string;
   }) => mutate<{ registered: boolean }>('/auth/recovery/register/verify', input),
+};
+
+export interface SeriesPoint {
+  date: string;
+  value: number | null;
+  sampleCount: number;
+}
+
+export interface StudiesSeries {
+  metricKey: string;
+  unit: string;
+  granularity: 'day' | 'week';
+  points: SeriesPoint[];
+  algorithmVersion: string;
+  timezone: string;
+}
+
+export interface StudiesDashboard {
+  period: { from: string; to: string; timezone: string };
+  summary: {
+    totalMinutes: number;
+    sessionCount: number;
+    daysStudied: number;
+    averageMinutes: number | null;
+  };
+  series: SeriesPoint[];
+  generatedAt: string;
+}
+
+function dateQuery(from: string, to: string): string {
+  return `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+}
+
+/** Estudos: primeira vertical slice com persistência real e idempotência. */
+export const studiesApi = {
+  areas: (signal?: AbortSignal) => read<AreaDto[]>('/studies/areas', signal),
+  courses: (signal?: AbortSignal) => read<CourseDto[]>('/studies/courses', signal),
+  sessions: (signal?: AbortSignal) => read<StudySessionDto[]>('/studies/sessions', signal),
+  sessionDetail: (id: string, signal?: AbortSignal) =>
+    read<{ session: StudySessionDto; observations: ObservationDto[] }>(
+      `/studies/sessions/${encodeURIComponent(id)}`,
+      signal,
+    ),
+  series: (query: SeriesQuery, signal?: AbortSignal) =>
+    read<StudiesSeries>(
+      `/studies/series?${dateQuery(query.from, query.to)}&granularity=${query.granularity ?? 'day'}`,
+      signal,
+    ),
+  dashboard: (from: string, to: string, signal?: AbortSignal) =>
+    read<StudiesDashboard>(`/studies/dashboard?${dateQuery(from, to)}`, signal),
+  createCourse: (input: CreateCourseRequest, idempotencyKey: string) =>
+    mutate<CourseDto>('/studies/courses', input, { 'Idempotency-Key': idempotencyKey }),
+  createSession: (input: CreateStudySessionRequest, idempotencyKey: string) =>
+    mutate<StudySessionDto>('/studies/sessions', input, { 'Idempotency-Key': idempotencyKey }),
 };
 
 async function refreshCsrfAfterAuth(): Promise<void> {

@@ -14,11 +14,11 @@ describe('navegação principal', () => {
     expect(NAVIGATION_GROUPS.map((group) => group.id)).toEqual(['core', 'life', 'system']);
   });
 
-  it('marca apenas visão geral e configurações como disponíveis', () => {
+  it('marca visão geral, estudos e configurações como disponíveis', () => {
     const available = NAVIGATION_ITEMS.filter((item) => item.availability === 'available').map(
       (item) => item.key,
     );
-    expect(available).toEqual(['overview', 'settings']);
+    expect(available).toEqual(['overview', 'studies', 'settings']);
     expect(NAVIGATION_ITEMS.some((item) => item.availability === 'not-configured')).toBe(true);
     expect(NAVIGATION_ITEMS.some((item) => item.availability === 'planned')).toBe(true);
   });

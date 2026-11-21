@@ -4,6 +4,7 @@ import { Icon } from '@/components/icons';
 import type { AccountSummary } from '@/features/auth/use-session';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { PlannedPage } from '@/features/planned/PlannedPage';
+import { StudiesPage } from '@/features/studies/StudiesPage';
 import { SettingsPage } from '@/features/settings/SettingsPage';
 import { NAVIGATION_ITEMS, type NavigationItem } from '@/lib/navigation';
 
@@ -39,6 +40,7 @@ export function AppRoutes({ account, onSignOut }: AppRoutesProps) {
   return (
     <Routes>
       <Route path="/" element={<DashboardPage account={account} />} />
+      <Route path="/estudos" element={<StudiesPage account={account} />} />
       <Route
         path="/configuracoes"
         element={<SettingsPage account={account} onSignOut={onSignOut} />}

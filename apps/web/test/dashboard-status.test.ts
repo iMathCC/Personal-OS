@@ -28,6 +28,21 @@ describe('status das áreas do dashboard', () => {
     ).toBe('no-data');
   });
 
+  it('só marca estudos como ativo quando a API devolve sessões reais', () => {
+    const studies = NAVIGATION_ITEMS.find((item) => item.key === 'studies');
+    expect(studies).toBeDefined();
+    if (!studies) return;
+
+    expect(deriveAreaStatus(studies, { health: healthy, counts })).toBe('no-data');
+    expect(
+      deriveAreaStatus(studies, { health: healthy, counts, studies: { sessionCount: 0 } }),
+    ).toBe('no-data');
+    expect(
+      deriveAreaStatus(studies, { health: healthy, counts, studies: { sessionCount: 3 } }),
+    ).toBe('active');
+    expect(deriveAreaStatus(studies, { health: healthy, counts, loading: true })).toBe('loading');
+  });
+
   it('nunca inventa atividade em módulos sem endpoint', () => {
     const planned = NAVIGATION_ITEMS.filter((item) => item.availability === 'planned');
     const notConfigured = NAVIGATION_ITEMS.filter((item) => item.availability === 'not-configured');

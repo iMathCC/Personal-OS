@@ -70,7 +70,7 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
         label: 'Estudos',
         path: '/estudos',
         group: 'life',
-        availability: 'planned',
+        availability: 'available',
         description: 'Cursos e sessões de estudo com duração e tópico.',
       },
       {

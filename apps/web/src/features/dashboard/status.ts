@@ -6,6 +6,8 @@ export type AreaStatus = 'active' | 'no-data' | 'loading' | 'not-configured' | '
 export interface AreaStatusContext {
   readonly health: HealthResponse | null;
   readonly counts: { passkeys: number; activeSessions: number };
+  /** Sinal real de Estudos; ausente enquanto carrega ou em erro. */
+  readonly studies?: { sessionCount: number };
   /** Distingue o carregamento inicial de uma resposta válida sem dados. */
   readonly loading?: boolean;
 }
@@ -26,6 +28,11 @@ export function deriveAreaStatus(item: NavigationItem, context: AreaStatusContex
 
   if (item.key === 'settings') {
     return context.counts.passkeys > 0 && context.counts.activeSessions > 0 ? 'active' : 'no-data';
+  }
+
+  if (item.key === 'studies') {
+    if (context.loading === true) return 'loading';
+    return (context.studies?.sessionCount ?? 0) > 0 ? 'active' : 'no-data';
   }
 
   return 'no-data';

@@ -16,9 +16,10 @@ interface DashboardPageProps {
 const CYCLE = 'Coletar → Integrar → Analisar → Projetar → Decidir → Executar → Avaliar';
 
 export function DashboardPage({ account }: DashboardPageProps) {
-  const { state, reload } = useDashboard();
+  const { state, reload } = useDashboard(account.user.timezone);
   const today = useMemo(() => new Date(), []);
   const health = state.status === 'ready' ? state.health : null;
+  const studies = state.status === 'ready' ? state.studies : null;
   const firstName = account.user.displayName.trim().split(/\s+/u)[0] || account.user.displayName;
 
   return (
@@ -59,6 +60,7 @@ export function DashboardPage({ account }: DashboardPageProps) {
               status={deriveAreaStatus(item, {
                 health,
                 counts: account.counts,
+                ...(studies === null ? {} : { studies: { sessionCount: studies.sessionCount } }),
                 loading: state.status === 'loading',
               })}
             />
@@ -93,16 +95,50 @@ export function DashboardPage({ account }: DashboardPageProps) {
         </div>
 
         <div>
-          <h2 className="text-base font-semibold">Atividade recente</h2>
+          <h2 className="text-base font-semibold">Atividade de estudos</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            Registros e check-ins que aconteceram nos últimos dias.
+            Sessões registradas nos últimos 30 dias, vindas da API.
           </p>
           <div className="mt-4">
-            <EmptyState
-              eyebrow="Sem dados"
-              title="Nenhuma atividade registrada"
-              description="A API ainda não expõe eventos, tarefas ou check-ins. Esta seção passará a mostrar atividades reais assim que esses módulos existirem; enquanto isso, nenhum registro simulado é exibido."
-            />
+            {state.status === 'loading' && <LoadingPanel label="Carregando atividade…" lines={2} />}
+            {state.status === 'error' && (
+              <ErrorPanel title="Atividade indisponível" message={state.message} onRetry={reload} />
+            )}
+            {studies !== null && studies.recentSessions.length === 0 && (
+              <EmptyState
+                eyebrow="Sem dados"
+                title="Nenhuma sessão registrada"
+                description="Nenhuma sessão de estudo foi registrada nos últimos 30 dias. Esta área mostra apenas registros reais."
+              />
+            )}
+            {studies !== null && studies.recentSessions.length > 0 && (
+              <>
+                <ul className="divide-y divide-border rounded-xl border border-border bg-card">
+                  {studies.recentSessions.map((session) => (
+                    <li key={session.id} className="flex items-center justify-between gap-3 p-4">
+                      <div>
+                        <p className="text-sm font-medium">{session.topic}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{session.localDate}</p>
+                      </div>
+                      <span className="shrink-0 text-sm tabular-nums text-foreground/80">
+                        {session.durationMinutes} min
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {studies.sessionCount} sessões · {studies.daysStudied} dias ·{' '}
+                  {studies.totalMinutes} min no período.
+                </p>
+                <Link
+                  to="/estudos"
+                  className="mt-3 inline-flex min-h-11 items-center gap-2 text-sm text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  Ver estudos
+                  <Icon name="arrow" size={15} />
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -140,7 +176,7 @@ export function DashboardPage({ account }: DashboardPageProps) {
             <EmptyState
               eyebrow="Sem sinais"
               title="Nada a destacar com os dados disponíveis"
-              description="A API respondeu normalmente, mas ainda não há fontes de dados de domínio para derivar alertas, prioridades ou recomendações. Esta área ficará pronta quando os módulos de registro entrarem em operação."
+              description="A API respondeu normalmente e os registros de estudos estão disponíveis, mas nenhuma recomendação ou prioridade é gerada automaticamente a partir deles. Alertas exigirão uma decisão explícita de regras em uma entrega futura."
             />
           )}
         </div>
