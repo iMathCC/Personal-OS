@@ -26,6 +26,10 @@ Começar em `*.workers.dev` (R$ 0) e **decidir o domínio definitivo antes do ca
 | Subdomínio gratuito de terceiro | R$ 0 | Depende do controle do domínio | Não | Frágil; não recomendado |
 | Cloudflare Access + domínio | ~US$ 10/ano | Access gerencia | Sim | Auth mais simples, menos controle local |
 
+## Atualização 21/11/2026 — RP ID em `workers.dev`
+
+`workers.dev` consta na Public Suffix List. Portanto, o domínio registrável é o hostname completo de três rótulos: o RP ID deve ser `personal-os.<subdominio>.workers.dev`, e não `<subdominio>.workers.dev`. `ORIGIN` precisa ser exatamente `https://personal-os.<subdominio>.workers.dev`. A validação de WebAuthn permanece rigorosa; não há flexibilização para deploy. O hostname definitivo deve ser escolhido antes do primeiro cadastro de passkey. Procedimento em [free-deployment.md](../operations/free-deployment.md).
+
 ## Consequências
 
 **Positivas (workers.dev):** zero custo, setup imediato, HTTPS/PWA.

@@ -157,7 +157,7 @@ A Entrega 1 da Tarefa 1.2 validou `@simplewebauthn/server@14.1.0` no Workers com
 
 `apps/api/wrangler.toml` é um modelo com placeholders; a config efetiva é gerada por `npm run deploy:prepare` e validada por `npm run deploy:check`. Antes de publicar é preciso autorização humana para: criar o banco D1 remoto, definir `RP_ID`/`ORIGIN`, definir os segredos no Worker, aplicar migrações em workflow aprovado e executar `npm run deploy`.
 
-Runbook completo em [docs/operations/deploy.md](docs/operations/deploy.md). `wrangler deploy --dry-run` e `deploy:check` já passaram com valores sintéticos; nenhum recurso remoto foi criado.
+Runbook completo em [docs/operations/deploy.md](docs/operations/deploy.md). A publicação gratuita em `workers.dev` (R$ 0, sem domínio plano pago) está detalhada em [docs/operations/free-deployment.md](docs/operations/free-deployment.md), incluindo a regra de RP ID para o hostname completo. `wrangler deploy --dry-run` e `deploy:check` já passaram com valores sintéticos de `workers.dev`; nenhum recurso remoto foi criado.
 
 ## Limitações conhecidas desta etapa
 

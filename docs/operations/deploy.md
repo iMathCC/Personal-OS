@@ -2,6 +2,8 @@
 
 Este runbook cobre a preparação local/isolada e o que **deve** acontecer no deploy. Nenhum deploy público, domínio, DNS ou recurso Cloudflare remoto foi executado na Entrega 6: essas ações exigem autorização humana explícita.
 
+Para publicação no endereço gratuito, use [free-deployment.md](free-deployment.md): ele detalha plano Free, `workers.dev`, RP ID completo, limites, classificação de custos, secrets, validação e desativação.
+
 ## 1. Pré-requisitos
 
 - Node 24 (`engines.node >=24 <25`) e npm 11; `.nvmrc` fixado.
