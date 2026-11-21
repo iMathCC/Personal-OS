@@ -27,3 +27,10 @@ migrations_dir = "migrations"
 binding = "DB_TEST"
 database_name = "personal-os-test"
 database_id = "00000000-0000-0000-0000-000000000001"
+
+# Mesmo roteamento de produção: Worker decide /api/* e assets cuidam do resto.
+[assets]
+directory = "../web/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]

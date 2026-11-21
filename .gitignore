@@ -17,6 +17,9 @@ build/
 # Configuração local do Worker (copiar de wrangler.local.example.toml)
 apps/api/wrangler.local.toml
 
+# Configuração de produção gerada a partir de variáveis públicas (nunca versionar)
+apps/api/wrangler.production.toml
+
 # Testes e cobertura
 coverage/
 playwright-report/

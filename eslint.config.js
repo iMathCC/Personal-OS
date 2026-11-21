@@ -51,4 +51,11 @@ export default tseslint.config(
       globals: globals.node,
     },
   },
+  {
+    // Scripts operacionais rodam em Node, não no navegador nem no Worker.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 );

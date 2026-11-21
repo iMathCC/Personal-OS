@@ -1,3 +1,6 @@
+# MODELO de configuração de produção. Não usar diretamente: contém placeholders.
+# Gere a config efetiva com `npm run deploy:prepare` (variáveis públicas via env)
+# e validecom `npm run deploy:check`. O arquivo gerado é gitignored.
 name = "personal-os"
 main = "src/index.ts"
 compatibility_date = "2026-11-20"
@@ -8,11 +11,22 @@ APP_VERSION = "0.1.0"
 # Configuração pública. Ajuste RP_ID/ORIGIN antes do primeiro cadastro de passkey.
 RP_ID = "REPLACE_WITH_RP_ID"
 RP_NAME = "Personal OS"
-ORIGIN = "https://REPLACE_WITH_ORIGIN"
+ORIGIN = "REPLACE_WITH_ORIGIN"
 # SETUP_TOKEN, CSRF_SECRET e IP_HASH_SALT são segredos:
 #   wrangler secret put SETUP_TOKEN
 #   wrangler secret put CSRF_SECRET
 #   wrangler secret put IP_HASH_SALT
+
+[secrets]
+required = ["SETUP_TOKEN", "CSRF_SECRET", "IP_HASH_SALT"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+redact_query_string = true
+issues = { enabled = true }
+logs = { enabled = true, head_sampling_rate = 1, invocation_logs = false, persist = true }
+traces = { enabled = false }
 
 [[d1_databases]]
 binding = "DB"

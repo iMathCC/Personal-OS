@@ -28,13 +28,21 @@
     "test:integration": "npm run test -w @personal-os/api -- test/db",
     "db:generate": "npm run generate -w @personal-os/db",
     "db:migrate:local": "wrangler d1 migrations apply DB --local --config apps/api/wrangler.local.toml",
-    "db:seed:local": "wrangler d1 execute DB --local --config apps/api/wrangler.local.toml --file packages/db/src/seed.sql",
+    "db:seed:local": "wrangler d1 execute DB --local --yes --config apps/api/wrangler.local.toml --file packages/db/src/seed.sql",
+    "deploy:prepare": "node scripts/prepare-production-config.mjs",
+    "deploy:check": "node scripts/check-production-config.mjs",
+    "backup:d1": "node scripts/backup-d1.mjs",
+    "restore:d1": "node scripts/restore-d1.mjs",
+    "backup:drill": "node scripts/backup-drill.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:env": "node scripts/prepare-browser-env.mjs",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
-    "deploy": "npm run build && wrangler deploy --config apps/api/wrangler.toml"
+    "deploy": "npm run deploy:check && npm run build && wrangler deploy --config apps/api/wrangler.production.toml"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261120.1",
     "@eslint/js": "10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "24.19.2",
     "concurrently": "10.0.7",
     "eslint": "10.15.0",
