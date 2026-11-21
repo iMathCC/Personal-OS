@@ -338,13 +338,23 @@ Ordem sugerida (uma entrega por módulo, com aceite próprio):
 6. Design system escuro com tokens Tailwind v4, ícones SVG próprios e componentes de loading/erro/vazio; cores do manifest PWA alinhadas ao tema.
 7. 14 testes no frontend (navegação, status, formatação no fuso do usuário e estados de interface) via Vitest + renderização SSR; nenhuma dependência nova de teste. Nenhum endpoint, schema, migration ou secret novo.
 
-**Fora do escopo das entregas 3 e 4:** CRUD de negócio, motor de recomendações, export/restauração, R2, Cron Triggers, deploy e E2E browser-driven (Playwright).
+**Tarefa 1.2 — Entrega 5 (modelo central e vertical slice de Estudos), em revisão local:**
 
-**Gate pendente:** CPU p95 em ambiente publicado ainda não medido; latências locais do spike e do health check não são CPU. O gate da §7 permanece aberto.
+1. Migração aditiva `0003_core_studies.sql`: `metrics`, `goals`, `goal_metrics`, `courses`, `study_sessions`, `metric_observations` (fonte canônica de fatos escalares, imutável, com correção por `superseded_by`), `events` com relações tipadas, `idempotency_key_reservations` e `operation_results` (ambas append-only). Migrações `0000`–`0002` intactas; `0003` testada do zero e como upgrade.
+2. Proveniência: `study_minutes` semeado como `src_calculation`; cada sessão gera uma observação derivada (`study-minutes-v1`) e um evento tipado, gravados com a sessão, a auditoria e o resultado no mesmo `db.batch()`. Correção preserva a original e insere a substituição antes de vincular `superseded_by`.
+3. Idempotência recuperável: chave canônica `v1|subject|method|path|clientKey`, reserva permanente antes da mutação, `claim` por PK como guard de concorrência, replay byte a byte de `operation_results` e limites validados antes de qualquer mutação.
+4. API: 11 endpoints em `/api/v1/studies` (áreas, cursos, sessões, observações, correção, série e dashboard), com autenticação, CSRF, validação Zod, DTOs allowlist e paginação por cursor.
+5. Frontend: página `/estudos` com registro real de cursos e sessões, resumo do período e listagem; o dashboard passou a exibir sessões e indicadores reais de Estudos em vez de empty states. Nenhuma biblioteca de D-14 foi adotada.
+6. Decisões locais registradas em [ADR-0013](decisions/0013-modelo-central-estudos.md). **Permanecem não aprovados** ADR-0005, ADR-0008 e D-11/D-13/D-14. Sem Cron, filas, `metric_daily`, serviços pagos, segredos ou novas dependências.
+7. Testes **executados**: domínio 34, web 30, API 77 (total 141). Integração de banco: 24 testes, incluindo 7 de schema/migração e 10 da vertical slice de Estudos. `npm run check` verde (format, lint, typecheck, test, build); bundle inicial 129,87 kB gzip, abaixo do limite de 250 kB.
+
+**Fora do escopo das entregas 3, 4 e 5:** CRUD de objetivos/projetos/tarefas, motor de recomendações, export/restauração, R2, Cron Triggers, deploy e E2E browser-driven (Playwright). Finanças seguem fora da vertical slice.
+
+**Gate pendente:** CPU p95 em ambiente publicado ainda não medido; latências locais do spike, do health check e dos testes de integração não são CPU de produção. O gate da §7 permanece aberto.
 
 ### 9.3 Próximo passo
 
-Aguardar **revisão explícita das Entregas 3 e 4**. A próxima tarefa da Tarefa 1.2 só será detalhada e iniciada após essa aprovação; não antecipar escopo, dependências ou schema além do já decidido em ADR.
+Aguardar **revisão explícita das Entregas 3, 4 e 5**. A próxima tarefa da Tarefa 1.2 só será detalhada e iniciada após essa aprovação; não antecipar escopo, dependências ou schema além do já decidido em ADR. A aprovação de ADR-0005/ADR-0008 ou de D-11/D-13/D-14 é decisão humana separada.
 
 ---
 

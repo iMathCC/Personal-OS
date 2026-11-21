@@ -2,7 +2,7 @@
 
 - **Versão:** 1.0 (Fase 0)
 - **Data:** 2026-11-20
-- **Status:** Aprovado; fundação implementada na Entrega 2 e fluxos de autenticação implementados na Entrega 3 da Tarefa 1.2 (aguardando revisão)
+- **Status:** Aprovado; fundação implementada na Entrega 2, fluxos de autenticação na Entrega 3 e modelo central/Estudos na Entrega 5 da Tarefa 1.2 (aguardando revisão). Ajustes locais da Entrega 5 em [ADR-0013](decisions/0013-modelo-central-estudos.md)
 - **Banco:** Cloudflare D1 (SQLite 3)
 - **ORM:** Drizzle ORM
 
@@ -44,7 +44,7 @@ Tabelas de fatos/observações (`transactions`, `metric_observations`, `study_se
 
 - Instantes: `TEXT` UTC ISO-8601 com milissegundos (`2026-11-20T18:30:00.000Z`).
 - Dias: `local_date TEXT` no formato `YYYY-MM-DD`, calculado no fuso do usuário (`users.timezone`).
-- `timezone` nunca é armazenado por registro na v1; a mudança de fuso não reescreve `local_date` históricos.
+- **Ajuste da Entrega 5 (ADR-0013):** `timezone` IANA passa a ser capturado por registro nas entidades de fato implementadas (`study_sessions`, `metric_observations`, `events`), preservando o fuso vigente no momento do fato. A mudança de fuso da conta não reescreve `local_date` históricos. A regra original ("`timezone` nunca é armazenado por registro na v1") fica revogada apenas para essas entidades; as demais continuam sem o campo.
 - Campos de data sem hora (`target_date`, `started_on`) usam `YYYY-MM-DD`.
 - Defaults SQL: `strftime('%Y-%m-%dT%H:%M:%fZ','now')`. Não usar `CURRENT_TIMESTAMP` (formato sem ms e com espaço).
 
@@ -318,18 +318,23 @@ Registro de acontecimentos (diário), distinto do log técnico.
 | Coluna | Tipo | Restrições | Notas |
 | --- | --- | --- | --- |
 | `area_id` | TEXT | NULL, FK areas | |
-| `project_id` | TEXT | NULL, FK projects, ON DELETE SET NULL | |
-| `goal_id` | TEXT | NULL, FK goals, ON DELETE SET NULL | |
+| `project_id` | TEXT | NULL, FK projects, ON DELETE SET NULL | Previsto no modelo; ainda sem coluna (não há tabela `projects`) |
+| `goal_id` | TEXT | NULL, FK goals, ON DELETE SET NULL | Implementado na Entrega 5 |
+| `course_id` | TEXT | NULL, FK courses, ON DELETE SET NULL | Adicionado na Entrega 5 |
+| `study_session_id` | TEXT | NULL, FK study_sessions, ON DELETE SET NULL | Adicionado na Entrega 5 |
 | `title` | TEXT | NOT NULL, 1..200 | |
 | `description` | TEXT | NULL | Markdown sanitizado na renderização |
 | `event_type` | TEXT | NOT NULL default `note` | Allowlist configurável |
 | `occurred_at` | TEXT | NOT NULL | UTC |
 | `local_date` | TEXT | NOT NULL | Para agrupamento |
+| `timezone` | TEXT | NOT NULL | IANA, capturado por registro (ADR-0013) |
 | `duration_minutes` | INTEGER | NULL, CHECK >= 0 | |
 | `payload_json` | TEXT | NULL | Dados específicos do tipo |
 | + comuns | | | |
 
-Índices: `idx_events_date(local_date)`, `idx_events_area_date(area_id, local_date)`, `idx_events_project(project_id)`.
+Relações são **tipadas** (`area_id`, `goal_id`, `course_id`, `study_session_id`); é proibido o par polimórfico `from_type`/`from_id`, que não pode ser representado por FK no SQLite.
+
+Índices implementados: `idx_events_date(local_date)`, `idx_events_area_date(area_id, local_date)`, `idx_events_goal(goal_id)`, `idx_events_course(course_id)`, `idx_events_session(study_session_id)`, `idx_events_source(source_id)`. `idx_events_project` será criado junto com a tabela `projects`.
 
 ### 3.10 `metrics`
 
@@ -358,25 +363,33 @@ Registro de acontecimentos (diário), distinto do log técnico.
 | `metric_id` | TEXT | NOT NULL, FK metrics | |
 | `observed_at` | TEXT | NOT NULL | UTC |
 | `local_date` | TEXT | NOT NULL | |
+| `timezone` | TEXT | NOT NULL | IANA, capturado por registro (ADR-0013) |
 | `value_num` | REAL | NULL | |
 | `value_text` | TEXT | NULL | Para categorias/booleano |
+| `sample_marker` | TEXT | NULL | Marcador estável da origem da amostra |
 | `dimension_json` | TEXT | NULL | Ex.: `{ "source": "manual" }`; não usar para séries paralelas |
 | `source_id` | TEXT | NOT NULL, FK sources | |
 | `source_ref` | TEXT | NULL | |
 | `dedupe_key` | TEXT | NULL, UNIQUE | Idempotência |
-| `confidence` | REAL | NULL, CHECK 0..1 | |
-| `algorithm_version` | TEXT | NULL | |
+| `confidence` | REAL | NULL, CHECK 0..1 | Obrigatório se `src_inference` |
+| `algorithm_version` | TEXT | NULL | Obrigatório se `src_calculation` |
 | `superseded_by` | TEXT | NULL, FK metric_observations | Correção |
-| `note` | TEXT | NULL | |
+| `course_id` | TEXT | NULL, FK courses, ON DELETE SET NULL | Adicionado na Entrega 5 |
+| `study_session_id` | TEXT | NULL, FK study_sessions, ON DELETE SET NULL | Adicionado na Entrega 5 |
+| `created_operation_id` | TEXT | NULL | Operação idempotente que criou a observação |
 | `created_at` | TEXT | NOT NULL | |
 
-Índices:
+Índices implementados:
 - `idx_obs_metric_time(metric_id, observed_at)`
 - `idx_obs_metric_date(metric_id, local_date)`
 - `idx_obs_source(source_id)`
 - `idx_obs_superseded(superseded_by)`
+- `idx_obs_session(study_session_id)`
+- `idx_obs_course(course_id)`
+- `idx_obs_active_metric_date(metric_id, local_date) WHERE superseded_by IS NULL`
+- `metric_observations_dedupe_unique` (parcial, `dedupe_key IS NOT NULL`)
 
-Regras: exatamente um de `value_num`/`value_text` conforme `metrics.value_type`; `superseded_by` não pode apontar para si; observação supersedida não entra em novos cálculos.
+Regras: exatamente um de `value_num`/`value_text`; `superseded_by` não pode apontar para si; observação supersedida não entra em novos cálculos; valores, métrica, instante, data e origem são **imutáveis** por trigger. Correção insere a substituição antes de vincular `superseded_by` (a FK é imediata); um segundo vínculo é abortado por trigger e o `batch` desfaz a inserção órfã. `note` foi substituído por `sample_marker` na implementação, para manter texto livre fora de consultas e auditorias.
 
 ### 3.12 `metric_daily`
 
@@ -587,6 +600,7 @@ Regras: transferência interna exige exatamente duas pernas com sinais opostos e
 | `topic` | TEXT | NOT NULL |
 | `started_at` | TEXT | NOT NULL |
 | `local_date` | TEXT | NOT NULL |
+| `timezone` | TEXT | NOT NULL | IANA, capturado por registro (ADR-0013) |
 | `duration_minutes` | INTEGER | NOT NULL, CHECK > 0 |
 | `units_completed` | REAL | NULL, CHECK >= 0 |
 | `notes` | TEXT | NULL |
@@ -594,7 +608,9 @@ Regras: transferência interna exige exatamente duas pernas com sinais opostos e
 | `dedupe_key` | TEXT | NULL, UNIQUE |
 | + comuns (imutável) | | |
 
-Índices: `idx_study_date(local_date)`, `idx_study_course(course_id)`.
+Índices implementados: `idx_study_date(local_date)`, `idx_study_course(course_id)`, `idx_study_source(source_id)`, `idx_study_active_date(local_date, id) WHERE deleted_at IS NULL` e `study_sessions_dedupe_unique`.
+
+**Regra da Entrega 5:** a duração da sessão é o fato manual. Ao criar a sessão, o serviço deriva uma `metric_observations` em `study_minutes` com `source_id = 'src_calculation'` e `algorithm_version = 'study-minutes-v1'`, além de um `events` com relação tipada à sessão (e ao curso, quando informado). Mutação, auditoria e resultado entram no mesmo `db.batch()`. Exclusão é lógica (`deleted_at` + `delete_operation_id`) e um trigger impede segunda exclusão. A tabela `courses` também passou a ter `created_operation_id`/`updated_operation_id` para rastrear a operação.
 
 ### 4.3 Carreira
 
@@ -832,7 +848,15 @@ Token temporário para registro de nova passkey durante recuperação.
 
 **`idempotency_keys`**
 
-`key` TEXT PK, `method` TEXT, `path` TEXT, `request_hash` TEXT, `status_code` INTEGER, `response_json` TEXT, `created_at`, `expires_at`. TTL 24 h. Limite de tamanho da resposta (ex.: 64 KB); respostas maiores não são armazenadas. Além de idempotência de API, a PK é usada como guard de uso único (`<purpose>:<id>`) e de limite de sessões (`guard:session-limit:<user_id>`) dentro do mesmo `db.batch()`; a violação de `UNIQUE` aborta a operação e é convertida em `409`.
+`key` TEXT PK, `method` TEXT, `path` TEXT, `request_hash` TEXT, `status_code` INTEGER, `response_json` TEXT, `created_at`, `expires_at`. Colunas aditivas da Entrega 5: `subject`, `op_id`, `state` (default `done`, valor `pending` durante a operação), `attempt`, `error_json`; índices `idx_idempotency_subject(subject, created_at)` e `idx_idempotency_op(op_id)`. TTL 24 h; o espelho em `response_json` é limitado a 8.192 bytes (`bodyOmitted` quando maior). Além de idempotência de API, a PK é usada como guard de uso único (`<purpose>:<id>`) e de limite de sessões (`guard:session-limit:<user_id>`) dentro do mesmo `db.batch()`; a violação de `UNIQUE` aborta a operação e é convertida em `409`. A `response_json` é apenas espelho operacional — a recuperação canônica vem de `operation_results`.
+
+**`idempotency_key_reservations` (Entrega 5, append-only)**
+
+`key` TEXT PK, `operation_id` TEXT (UUIDv7), `request_hash` TEXT (SHA-256), `created_at`. Identidade **permanente** da chave canônica `v1|subject|method|path|clientKey`, gravada antes da mutação. Triggers bloqueiam `UPDATE` e `DELETE`; a limpeza comum não a remove. Sobrevive à expiração/remoção de `idempotency_keys`.
+
+**`operation_results` (Entrega 5, append-only)**
+
+`key` TEXT PK, `operation_id` TEXT, `request_hash` TEXT, `status_code` INTEGER, `body_json` TEXT, `created_at`. Guarda o envelope original byte a byte para replay; `body_json` é JSON válido de até 32.768 bytes. Triggers bloqueiam `UPDATE` e `DELETE`; índice `idx_operation_results_op(operation_id)`. A recuperação confere `request_hash`: mesma chave com conteúdo diferente retorna `409 CONFLICT`.
 
 **`rate_limits`**
 
@@ -859,7 +883,14 @@ Token temporário para registro de nova passkey durante recuperação.
 | Agregado diário | PK `metric_daily(metric_id, local_date)` |
 | Transações por conta/período | `transactions(account_id, occurred_at)` |
 | Transações por período | `transactions(local_date)` |
-| Sessões de estudo/leitura | `(local_date)`, `(course_id)`/`(book_id)` |
+| Sessões de estudo/leitura | `idx_study_date(local_date)`, `idx_study_course(course_id)` |
+| Sessões ativas paginadas | `idx_study_active_date(local_date, id) WHERE deleted_at IS NULL` |
+| Observações válidas por métrica/dia | `idx_obs_active_metric_date(metric_id, local_date) WHERE superseded_by IS NULL` |
+| Observações por sessão/curso | `idx_obs_session(study_session_id)`, `idx_obs_course(course_id)` |
+| Eventos por curso/sessão | `idx_events_course(course_id)`, `idx_events_session(study_session_id)` |
+| Curso por área/status | `idx_courses_area_status(area_id, status) WHERE deleted_at IS NULL` |
+| Recuperação idempotente | PK `operation_results(key)`, PK `idempotency_key_reservations(key)` |
+| Auditoria por requisição | `idx_audit_request_entity(request_id, entity_type, entity_id, action)` |
 | Treinos por período | `workouts(local_date)` |
 | Sets por exercício | `workout_sets(exercise_id)` (PK cobre workout) |
 | Histórico de entidade | `audit_log(entity_type, entity_id, created_at)` |
@@ -871,7 +902,7 @@ Token temporário para registro de nova passkey durante recuperação.
 - Índices parciais `WHERE deleted_at IS NULL` para consultas de entidades ativas.
 - Evitar índices em colunas de baixa seletividade sem consulta comprovada; cada índice aumenta escritas.
 - Listagens usam paginação por cursor (campo ordenado + `id`), nunca `OFFSET` em tabelas grandes.
-- Consultas de dashboard usam `metric_daily`/resumos, não varreduras de observações brutas.
+- Consultas de dashboard usam `metric_daily`/resumos, não varreduras de observações brutas — **exceto na Entrega 5**, onde séries e dashboard de Estudos leem observações ativas com limite explícito de 10.000 linhas (ADR-0013, sem agregados materializados aprovados).
 
 ---
 
@@ -884,8 +915,9 @@ Token temporário para registro de nova passkey durante recuperação.
 5. Seeds idempotentes em `packages/db/src/seed.sql` (`ON CONFLICT ... DO NOTHING`):
    - fontes de sistema (`src_manual`, `src_import`, `src_calculation`, `src_inference`);
    - 8 áreas com IDs UUIDv7 fixos;
-   - nenhuma métrica, objetivo, categoria financeira ou dado fictício.
-6. Migrações desta entrega: `0000_init.sql` (12 tabelas), `0001_audit_append_only.sql` (triggers de auditoria e limite de sessões) e `0002_audit_no_replace.sql` (bloqueio de `INSERT OR REPLACE`).
+   - a métrica idempotente `study_minutes` (Entrega 5, `src_calculation`, unidade `min`, agregação `sum`);
+   - nenhum objetivo, categoria financeira ou dado fictício.
+6. Migrações: `0000_init.sql` (12 tabelas), `0001_audit_append_only.sql` (triggers de auditoria e limite de sessões), `0002_audit_no_replace.sql` (bloqueio de `INSERT OR REPLACE`) e `0003_core_studies.sql` (Entrega 5: modelo central, Estudos, relações tipadas, reserva/resultado idempotente e guardas de transição). `0003` é aditiva e foi testada do zero e como upgrade; as anteriores não foram alteradas.
 7. D1 local: `npm run db:migrate:local` e `npm run db:seed:local` (binding `DB` de `apps/api/wrangler.local.toml`). Testes usam o binding descartável `DB_TEST`, sem `migrations_dir`.
 8. Produção: workflow separado com aprovação, backup/export antes de migrações destrutivas.
 
@@ -911,14 +943,16 @@ Todos opcionais exceto `local_date`, para permitir registro rápido. A UI móvel
 | `audit_log` | 12 meses (configurável) | Purge mensal; nunca contém tokens |
 | `sessions` | Expiração + 30 dias | Revogação imediata |
 | `auth_challenges` | 10 minutos | Purge no job de manutenção |
-| `idempotency_keys` | 24 horas | |
+| `idempotency_keys` | 24 horas | Espelho operacional; limpeza comum permitida |
+| `idempotency_key_reservations` | Indefinida na Entrega 5 | Append-only; política de retenção própria a decidir |
+| `operation_results` | Indefinida na Entrega 5 | Append-only; necessária para replay exato |
 | `rate_limits` | 24 horas | |
 | `metric_observations` supersedidas | Mantidas | Histórico de correções |
 | Projeções/recomendações antigas | 12 meses após `expires_at` | Exceto aceitas/executadas, mantidas |
 | Backups R2 | 8 semanas | Rotação automática |
 | Logs do provedor | 3 dias (free) | Fora do controle do app |
 
-Purge físico de soft-deleted: job mensal, somente após 30 dias, com registro em `audit_log` (`action = purge`). Dados financeiros/saúde exigem confirmação explícita do usuário para purge antecipado.
+Purge físico de soft-deleted: job mensal, somente após 30 dias, com registro em `audit_log` (`action = purge`). Dados financeiros/saúde exigem confirmação explícita do usuário para purge antecipado. A retenção de 12 meses de `audit_log` (D-13) **não foi implementada** na Entrega 5 e permanece pendente de aprovação.
 
 ---
 
@@ -947,6 +981,9 @@ Purge físico de soft-deleted: job mensal, somente após 30 dias, com registro e
 - Saldo derivado nunca usa transações `void`/`pending` (conforme política definida: pendentes não entram no saldo exibido).
 - Observação supersedida não entra em agregação.
 - `metric_daily` recalculado é idempotente.
+- Correção de observação preserva a original, cria a substituição antes de vincular `superseded_by` e aborta uma segunda correção concorrente (Entrega 5).
+- Chave idempotente produz uma única mutação sob concorrência e recupera o envelope original após limpeza da chave operacional (Entrega 5).
+- `audit_log`, reservas e resultados são append-only; limpeza comum não os remove (Entrega 5).
 - `workout_sets` sem duplicata de `set_index` por exercício.
 - `reading_sessions.end_page >= start_page`.
 - `habit_logs` únicos por hábito/dia.

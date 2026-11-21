@@ -4,7 +4,7 @@
 - **Base:** `/api/v1`
 - **Formato:** JSON UTF-8
 - **Autenticação:** cookie de sessão `__Host-pos_session`
-- **Status:** Proposta para aprovação; seção de autenticação (§2) implementada na Entrega 3 da Tarefa 1.2, aguardando revisão
+- **Status:** Proposta para aprovação; seção de autenticação (§2) implementada na Entrega 3, Estudos (§4.2) e idempotência recuperável (§1.5) implementadas na Entrega 5 da Tarefa 1.2, aguardando revisão
 
 A API é a **única porta de acesso aos dados**. O frontend não acessa D1, R2 ou serviços externos diretamente. Contratos são definidos com Zod em `packages/shared` e reutilizados no cliente e no servidor.
 
@@ -87,18 +87,22 @@ Erro:
 - `from`/`to` são inclusivos, interpretados no fuso do usuário.
 - Parâmetros desconhecidos são rejeitados (`VALIDATION_ERROR`) para evitar erros silenciosos.
 
-### 1.5 Idempotência
+### 1.5 Idempotência (implementada na Entrega 5)
 
-- `POST` de criação aceita `Idempotency-Key` (UUID ou string ≤ 128 chars).
-- Mesma chave + mesmo corpo → retorna a resposta original (status e corpo).
-- Mesma chave + corpo diferente → `409 CONFLICT`.
-- Janela: 24 h. Respostas > 64 KB não são armazenadas (recusa com `413`).
+- `POST` de criação aceita `Idempotency-Key` (1–200 bytes UTF-8, sem caracteres de controle); ausência → `400 VALIDATION_ERROR`.
+- A chave canônica é `v1|subject|method|path|clientKey`, com codificação injetiva. O `subject` é o usuário autenticado; `path` não contém query. A query entra apenas no hash da requisição (método + caminho + query + corpo), nunca na identidade da chave.
+- Mesma chave + mesmo conteúdo → retorna a resposta original (status e corpo byte a byte) com header `Idempotent-Replayed: true`.
+- Mesma chave + conteúdo diferente → `409 CONFLICT`.
+- A reserva permanente da identidade é gravada **antes** da mutação e sobrevive à limpeza da linha operacional (`idempotency_keys`, TTL 24 h). O resultado canônico fica em `operation_results` (append-only) e é a fonte do replay.
+- Concorrência: o `claim` na tabela operacional é um guard de PK no mesmo `db.batch()`; apenas uma mutação vence e os demais recuperam o resultado original.
+- Mutação + `audit_log` + resultado são gravados no mesmo `db.batch()`.
+- Limites: corpo original 16.384 bytes; resultado gravado 32.768 bytes; espelho operacional 8.192 bytes; envelope 65.536 bytes. Resultado acima do limite aborta **antes** da mutação com `413`; apenas o espelho acima do limite usa `bodyOmitted`.
 - Importações usam `dedupe_key` por linha, além do header.
 
 ### 1.6 Concorrência otimista
 
 - Respostas de recurso incluem `version` e header `ETag: "<version>"`.
-- `PATCH`/`PUT`/`DELETE` aceitam `If-Match: "<version>"`; ausência = última versão (permitido, mas registrado).
+- `PATCH`/`PUT`/`DELETE` aceitam `If-Match: "<version>"`; ausência = última versão (permitido, mas registrado). Em `DELETE /studies/sessions/:id`, a versão ausente é resolvida no servidor e o `UPDATE` usa `AND version = ?` como guard atômico.
 - Versão divergente → `409 CONFLICT` com `details.currentVersion`.
 
 ### 1.7 Segurança de transporte
@@ -111,7 +115,7 @@ Erro:
 
 ### 1.8 Limites
 
-- Corpo JSON: 256 KB (exceto importação, 5 MB em lotes); rotas `/api/v1/auth/*`: 16 KB (`413 PAYLOAD_TOO_LARGE`).
+- Corpo JSON: 256 KB (exceto importação, 5 MB em lotes); rotas `/api/v1/auth/*` e mutações `/api/v1/studies/*`: 16.384 bytes (`413 PAYLOAD_TOO_LARGE`).
 - Strings: 1–10.000 caracteres conforme campo.
 - `metadata_json`: 16 KB.
 - Respostas de lista: máximo 200 itens.
@@ -441,6 +445,63 @@ Padrão uniforme: `GET/POST /<recurso>`, `GET/PATCH/DELETE /<recurso>/:id`, com 
 ```
 
 Regras: `amountCents != 0`; moeda igual à da conta; `externalRef`/`dedupeKey` para idempotência de importação.
+
+### 4.2 Estudos — vertical slice implementado (Entrega 5)
+
+Base: `/api/v1/studies`. Todas as rotas exigem sessão e CSRF. Contratos Zod em `packages/shared/src/studies.ts`.
+
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| GET | `/studies/areas` | Área ativa de Estudos (seed) |
+| GET | `/studies/courses` | Cursos ativos (≤ 200) |
+| POST | `/studies/courses` | Cria curso; exige `Idempotency-Key` |
+| POST | `/studies/sessions` | Cria sessão + observação derivada + evento; exige `Idempotency-Key` |
+| GET | `/studies/sessions` | Lista por `from`, `to`, `courseId`, `cursor`, `limit` (≤ 200) |
+| GET | `/studies/sessions/:id` | Detalhe com observações |
+| GET | `/studies/sessions/:id/observations` | Observações da sessão |
+| DELETE | `/studies/sessions/:id` | Exclusão lógica; aceita `If-Match` |
+| POST | `/studies/observations/:id/supersede` | Corrige valor preservando a original; exige `Idempotency-Key` |
+| GET | `/studies/series` | `from`, `to`, `granularity=day\|week` |
+| GET | `/studies/dashboard` | `from`, `to` |
+
+Corpo de criação de sessão:
+
+```json
+{
+  "courseId": null,
+  "topic": "Revisão de algoritmos",
+  "startedAt": "2026-11-20T23:30:00.000Z",
+  "timezone": "America/Sao_Paulo",
+  "durationMinutes": 45,
+  "unitsCompleted": null,
+  "notes": null
+}
+```
+
+`timezone` é validado como identificador IANA; `local_date` é calculado no servidor a partir dele (nunca do fuso do Worker). A resposta `201` devolve a sessão com `localDate: "2026-11-20"`. A duração gera uma observação em `study_minutes` com `sourceId: "src_calculation"` e `algorithmVersion: "study-minutes-v1"`; `notes` nunca entra no snapshot de auditoria.
+
+Correção: `{ "valueNum": 60, "reason": "..." }` (campo `reason` aceito mas não persistido em texto livre). A original permanece com `supersededBy` apontando para a substituição; a substituição usa `src_manual`. Segunda correção da mesma observação → `409`.
+
+Série:
+
+```json
+{
+  "data": {
+    "metricKey": "study_minutes",
+    "unit": "min",
+    "granularity": "day",
+    "points": [
+      { "date": "2026-11-18", "value": 45, "sampleCount": 1 },
+      { "date": "2026-11-19", "value": null, "sampleCount": 0 }
+    ],
+    "algorithmVersion": "study-minutes-v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "meta": { "requestId": "req_01J..." }
+}
+```
+
+Lacunas são `null` explícito, nunca zero. Séries e dashboard são calculadas sob demanda sobre observações ativas com limite de 10.000 linhas e ≤ 8 queries; não há agregados materializados nesta entrega (ADR-0008 segue proposto).
 
 ---
 
