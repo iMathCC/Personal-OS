@@ -395,7 +395,7 @@ Lacunas são `null` explícito, nunca zero.
 
 - Endpoint de composição (somente leitura); cada bloco declara a fonte.
 - Não calcula em tempo real varreduras pesadas; usa agregados.
-- `ETag`/`Cache-Control: private, max-age=60` para reduzir requisições.
+- `Cache-Control: no-store, no-cache, must-revalidate` (política da Entrega 6): nenhuma resposta de API é armazenada em cache.
 
 ### 3.9 Auditoria
 
@@ -564,11 +564,10 @@ Export retorna `Content-Disposition` e checksum no header `X-Content-SHA256`.
 
 ## 7. Cache e ETags
 
-- GETs de recursos: `ETag` baseado em `version` + `updatedAt`; suporta `If-None-Match` → `304`.
-- Dashboard: `Cache-Control: private, max-age=60`; invalidação por `updatedAt` agregado.
-- Referências (áreas, métricas): `max-age=300`.
-- Nunca cachear respostas autenticadas em CDN pública; `private` sempre.
-- Service Worker usa cache próprio e limpa no logout.
+- Política vigente (Entrega 6): **toda** resposta `/api/v1/*`, autenticada ou não, envia `Cache-Control: no-store, no-cache, must-revalidate`.
+- Não há `ETag`/`304` para GETs de API; `version` e `If-Match` continuam sendo usados apenas como controle otimista de mutação.
+- Service Worker faz precache somente de assets públicos do shell (`workbox-precache-v2-*`), sem `runtimeCaching` e sem cache de dados de domínio.
+- A limpeza no logout remove todos os caches exceto o precache; a tela offline é renderizada a partir dos assets precarregados, sem dados privados.
 
 ---
 

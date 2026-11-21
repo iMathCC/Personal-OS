@@ -19,6 +19,7 @@ Cada ADR registra uma decisão estrutural, o contexto, as alternativas e as cons
 | [0011](0011-dominio-e-workers-dev.md) | Domínio e `workers.dev` | Aceito |
 | [0012](0012-invariantes-operacionais-de-auth.md) | Invariantes operacionais de autenticação e auditoria | Aceito com ajustes |
 | [0013](0013-modelo-central-estudos.md) | Modelo central, Estudos e idempotência recuperável (Entrega 5) | Aceito no escopo local da Entrega 5 |
+| [0014](0014-playwright-e2e.md) | Playwright para testes de navegador (Entrega 6) | Aceito no escopo local da Entrega 6 |
 
 ## Status possíveis
 

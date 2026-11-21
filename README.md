@@ -68,7 +68,14 @@ As migrações ficam em `apps/api/migrations` (o Wrangler as aplica pelo binding
 | `npm run db:migrate:local` | Aplica migrações pendentes no D1 local (`DB`) |
 | `npm run db:seed:local` | Aplica os seeds idempotentes no D1 local (`DB`) |
 | `npm run check` | Formatação + lint + typecheck + testes + build |
-| `npm run deploy` | Build da SPA e deploy do Worker (requer configuração Cloudflare) |
+| `npm run deploy:prepare` | Gera `apps/api/wrangler.production.toml` a partir de `RP_ID`, `ORIGIN` e `D1_DATABASE_ID` (gitignored) |
+| `npm run deploy:check` | Valida config gerada, assets e bindings antes do deploy |
+| `npm run deploy` | `deploy:check` + build + `wrangler deploy` (bloqueado até autorização) |
+| `npm run backup:d1` | Export lógico com allowlist, schema e manifest checksum |
+| `npm run restore:d1` | Restauração validada, somente em banco vazio |
+| `npm run backup:drill` | Drill completo em banco isolado (migrations, export, restore, verificação) |
+| `npm run test:e2e:env -- --reset` | Recria ambiente isolado HTTPS para navegador |
+| `npm run test:e2e` | Playwright em Chromium e Firefox contra o Worker isolado |
 
 ## Rodando localmente
 
@@ -124,7 +131,7 @@ npm run build
 npm audit --audit-level=high
 ```
 
-O CI em `.github/workflows/ci.yml` roda a sequência principal com Node 24 e `npm ci`, além de `npm audit --audit-level=high`. A suíte completa da API (`npm test`) já inclui os 17 testes de integração de banco; `npm run test:integration` é o atalho para executá-los isoladamente. Os 14 testes do frontend cobrem navegação, estados de interface, derivação de status e formatação de datas; não há testes visuais automatizados (Playwright não está instalado).
+O CI em `.github/workflows/ci.yml` roda a sequência principal com Node 24 e `npm ci`, além de `npm audit --audit-level=high`. A suíte completa da API (`npm test`) inclui testes de integração de banco; `npm run test:integration` é o atalho para executá-los isoladamente. Os testes unitários cobrem domínio (34), frontend (32) e API (81). Os testes de navegador usam Playwright local (Chromium + Firefox): `npm run test:e2e:env -- --reset`, iniciar o Worker em 8788 conforme instrução do script e `npm run test:e2e`. O fluxo de passkey real é automatizado no Chromium com autenticador virtual via CDP; no Firefox ele é explicitamente ignorado por limitação de automação. Detalhes em [ADR-0014](docs/decisions/0014-playwright-e2e.md).
 
 ### App Shell e dashboard (Entrega 4)
 
@@ -138,43 +145,31 @@ O dashboard usa apenas dados já existentes na API:
 
 Cards de áreas, Objetivos, Atividade recente e Atenção mostram estados vazios explicativos quando não há fonte de dados. Nenhum endpoint novo, schema, migration ou dado fictício foi introduzido. O roteador é `react-router` (já previsto no ADR-0001); o cliente de API continua único em `apps/web/src/lib/api.ts`.
 
-### Medição local (Tarefa 1.1)
+### Medições locais
 
-Medição em 2026-11-20, Node 24.22.3, `wrangler dev` local, 50 requisições sequenciais ao health check:
+Medições mais recentes (21/11/2026, Entrega 6): HTTP p50 39 ms / p95 113 ms, spans D1 p95 23 ms, no máximo 8 spans D1 por requisição e bundle inicial de **129,86 kB gzip**. Método, limitações e resultados completos em [docs/operations/local-measurements.md](docs/operations/local-measurements.md).
 
-| Métrica | Valor |
-| --- | --- |
-| p50 | 11,4 ms |
-| p95 | 15,7 ms |
-| Máximo | 18,8 ms |
+Medição histórica da Tarefa 1.1 (20/11/2026): p50 11,4 ms, p95 15,7 ms, máximo 18,8 ms em 50 requisições ao health check, com 104,29 KB gzip de bundle. O tempo é latência de ponta a ponta no runtime local (inclui overhead do Miniflare), não CPU isolada. CPU p95 por rota só é observável no ambiente Cloudflare publicado e segue pendente.
 
-O tempo é latência de ponta a ponta no runtime local (inclui overhead do Miniflare), não CPU isolada. CPU p95 por rota só é observável no ambiente Cloudflare publicado; deve ser medido após o primeiro deploy e registrado antes de considerar a Fase 1 concluída.
-
-Build da SPA nesta tarefa: **104,29 KB gzip** de JavaScript inicial (limite da Fase 1: 250 KB).
-
-A Entrega 1 da Tarefa 1.2 validou `@simplewebauthn/server@14.1.0` no Workers com 15 testes de spike (relatório em `docs/spikes/001-webauthn-workers.md`). A Entrega 2 adicionou 17 testes de integração de persistência. As latências locais continuam registradas como **latência**, não CPU: o gate de CPU p95 em ambiente publicado segue pendente antes de considerar a Fase 1 concluída.
+A Entrega 1 da Tarefa 1.2 validou `@simplewebauthn/server@14.1.0` no Workers com 15 testes de spike (relatório em `docs/spikes/001-webauthn-workers.md`).
 
 ## Deploy (ainda não executado)
 
-`apps/api/wrangler.toml` já declara assets da SPA, fallback `index.html`, roteamento `/api/*` para o Worker e o binding D1. Antes de publicar:
+`apps/api/wrangler.toml` é um modelo com placeholders; a config efetiva é gerada por `npm run deploy:prepare` e validada por `npm run deploy:check`. Antes de publicar é preciso autorização humana para: criar o banco D1 remoto, definir `RP_ID`/`ORIGIN`, definir os segredos no Worker, aplicar migrações em workflow aprovado e executar `npm run deploy`.
 
-1. Criar o banco e substituir `database_id` pelo ID real (`wrangler d1 create personal-os`).
-2. Rodar `npm run build` para gerar `apps/web/dist`.
-3. Configurar credenciais Cloudflare no ambiente/CI.
-
-O deploy de produção **não faz parte desta entrega** e depende da validação em ambiente publicado (inclusive as métricas de CPU que ainda não foram medidas).
+Runbook completo em [docs/operations/deploy.md](docs/operations/deploy.md). `wrangler deploy --dry-run` e `deploy:check` já passaram com valores sintéticos; nenhum recurso remoto foi criado.
 
 ## Limitações conhecidas desta etapa
 
-- Autenticação, passkeys, sessões e CSRF já funcionam, mas ainda não foram testadas em navegadores reais com autenticadores de plataforma diferentes (Chrome/Safari/iOS/Firefox).
+- Passkey real foi validada no Chromium com autenticador virtual; Safari/iOS, Firefox com autenticador de plataforma e dispositivos físicos seguem pendentes de validação humana.
 - `pos_vid` ainda não é usado; quando existir será dado complementar, com IP confiável e hashes com salt ([ADR-0012](docs/decisions/0012-invariantes-operacionais-de-auth.md)).
-- Runbook operacional descrito em `docs/SECURITY.md` §14, mas sem endpoints administrativos auditados.
-- Sem exportação/restauração, backup ou monitoramento de limites D1/Workers.
-- Sem módulos de negócio: não há CRUD de objetivos, atividades, finanças, estudos, saúde etc. O dashboard não exibe gráficos nem indicadores de domínio porque não há endpoints que os forneçam.
-- Não há testes visuais automatizados nem verificação em navegador neste ambiente (Playwright não está instalado): o layout desktop/mobile foi implementado com breakpoints Tailwind e revisado no código, mas precisa de conferência visual humana antes da aprovação.
-- PWA instalável e cache somente leitura de GETs; escrita offline não existe.
-- `npm run deploy` é apenas um atalho preparado; não foi validado contra a Cloudflare.
-- `npm audit` não tem high/critical, mas reporta vulnerabilidades `moderate` em dependências de desenvolvimento (esbuild via drizzle-kit; glob/minimatch via vite-plugin-pwa).
+- Runbooks operacionais em `docs/operations/`, mas sem endpoints administrativos auditados.
+- Backup/restauração lógicos funcionam e foram testados em banco isolado; não há backup automático em R2 nem monitoramento de cotas remotas.
+- Fora da vertical slice: CRUD de objetivos/projetos/tarefas, finanças, saúde e demais módulos. Estudos já tem registro real de cursos/sessões; gráficos e recomendações não existem.
+- Testes de navegador cobrem deep links, headers, PWA/offline, responsividade de 360–1920 px e foco/teclado, mas não substituem conferência visual humana antes da aprovação final.
+- PWA instalável com precache somente do shell; nenhuma resposta de API é cacheada e não há escrita offline.
+- `npm run deploy` está preparado e passou em `--dry-run`, mas não foi validado contra a Cloudflare remota.
+- `npm audit` não tem high/critical, mas reporta vulnerabilidades `moderate` em dependências de desenvolvimento (glob/minimatch via `vite-plugin-pwa`).
 
 ## Restrições centrais
 

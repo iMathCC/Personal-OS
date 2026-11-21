@@ -221,7 +221,9 @@ upgrade-insecure-requests;
 ### 6.5 Logs
 
 - Estruturados, com request ID, rota, status, duração, contagem de linhas D1.
-- **Nunca** logar: cookies, Authorization, corpos de auth, notas, valores de transações, conteúdo de saúde, chaves de IA.
+- Formato emitido pelo Worker: `api_request` com `requestId`, `method`, `path` (sem query string), `status`, `durationMs` e `code` de erro quando aplicável. Eventos `auth_failure` e `dependency_unavailable` usam os mesmos campos de contexto, sem corpo.
+- Cloudflare: `redact_query_string = true` e `invocation_logs = false`; logs de invocação automática não substituem os logs estruturados da aplicação.
+- **Nunca** logar: cookies, Authorization, corpos de auth, notas, valores de transações, conteúdo de saúde, chaves de IA, IP puro ou User-Agent.
 - Erros internos: logar apenas `level`, `message`, `requestId` e `errorName`; **sem stack trace**, SQL ou corpo da requisição. Resposta ao cliente é sempre `{ error: { code: 'INTERNAL_ERROR', message: 'Erro interno.', requestId } }`.
 - Retenção de logs do provedor: 3 dias (free). Não depender deles para auditoria.
 
@@ -231,6 +233,7 @@ upgrade-insecure-requests;
 
 - Segredos nunca no repositório: `.dev.vars`, `.env*` no `.gitignore`.
 - Produção: `wrangler secret put` (`SETUP_TOKEN`, `CSRF_SECRET`, `IP_HASH_SALT`, `AI_API_KEY` opcional, `R2_*`). `wrangler.local.toml` contém apenas valores dummy para desenvolvimento; nunca segredos reais.
+- `apps/api/wrangler.toml` é um modelo com placeholders; o Wrangler não interpola `${VAR}`. `npm run deploy:prepare` gera `apps/api/wrangler.production.toml` (gitignored, modo `0600`) a partir de `RP_ID`, `ORIGIN` e `D1_DATABASE_ID` vindos do ambiente; `npm run deploy:check` valida o resultado antes de qualquer deploy. Detalhes em `docs/operations/deploy.md`.
 - CI: GitHub Actions Secrets; token Cloudflare com escopo mínimo (Workers Scripts:Edit, D1:Edit, R2:Edit somente se backup).
 - Rotação: setup token após bootstrap; chave de IA ao menor sinal de exposição; token Cloudflare a cada 90 dias ou em incidente.
 - Separar credenciais por ambiente; nunca reutilizar token pessoal em CI.
@@ -260,7 +263,7 @@ upgrade-insecure-requests;
 - D1 Time Travel (7 dias no free) é recuperação operacional, **não** backup do usuário.
 - Export completo sob demanda; lembrete mensal na UI se o último export > 30 dias.
 - Backup automático semanal para R2 privado (se habilitado) + retenção de 8 semanas.
-- Teste de restauração trimestral em ambiente local; registrar resultado em `docs/operations/restore-drill.md` (a criar na Fase 1).
+- Teste de restauração trimestral em ambiente local; registrar resultado em `docs/operations/restore-drill.md`. Drill da Entrega 6 executado em banco isolado: 15 tabelas/25 linhas, checksum ida/volta igual, 11/11 triggers, 0 FKs inválidas, nenhuma tabela sensível restaurada.
 - Exportação inclui checksum; importação valida antes de aplicar.
 - RTO/RPO informais: RPO ≤ 7 dias (backup semanal) ou ≤ 24 h se export diário manual; RTO ≤ 1 h (recriar Worker + importar).
 - Plano de saída: exportar JSON/CSV, `wrangler d1 export`, migrar domínio/Worker; sem dependência de formato proprietário.
@@ -275,7 +278,7 @@ upgrade-insecure-requests;
 - Links externos: `rel="noopener noreferrer"`.
 - Downloads de exportação: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`.
 - Formulários: autocomplete adequado; token CSRF e dados de sessão ficam apenas em memória — **proibido** `localStorage`/`sessionStorage` para credenciais.
-- Cache do service worker limpo no logout; `/api/v1/auth/*` nunca é cacheado; caches privados (`api-get-v1*`, `private-*`) são removidos ao encerrar a sessão.
+- Cache do service worker limpo no logout; **nenhuma** resposta de `/api/v1/*` entra em cache. Todas as respostas de API enviam `Cache-Control: no-store, no-cache, must-revalidate`. A limpeza remove todos os caches exceto os de precache `workbox-precache-v2-*`, que contêm apenas assets públicos do shell. O service worker não usa `runtimeCaching` e remove caches obsoletos (`cleanupOutdatedCaches`).
 - Aviso de sessão expirada e redirecionamento seguro (sem open redirect; validar `returnTo` interno).
 - Estado autenticado obtido somente por `GET /auth/me`: `401` leva à tela de login com aviso de sessão expirada; falha de rede mostra erro com retry e nunca libera o shell. O shell e o dashboard não leem cookies nem armazenam tokens; nenhum dado de domínio é inferido no cliente.
 - Caches do service worker e DTOs de `/api/v1` são tratados como dados privados; os 8 itens de navegação sem módulo implementado não renderizam formulários que possam enviar dados a endpoints inexistentes.
@@ -326,9 +329,11 @@ upgrade-insecure-requests;
 - [ ] Teste de sessão revogada e expirada.
 - [ ] Documento de resposta a incidentes revisado.
 
+**Estado da Entrega 6 (validação local):** validados localmente setup/CSRF, revogação, expiração e recuperação com passkey real no Chromium; cookies `__Host-pos_session` com `Secure`/`HttpOnly`/`SameSite=Lax`; CSP/headers e `no-store` verificados em Chromium e Firefox; export/restauração verificados em banco isolado; `npm audit --audit-level=high` sem high/critical; logs revisados sem PII. **Pendente de produção:** passkeys em Safari/iOS e dispositivo físico, verificação externa de headers/CSP, R2 e rotação de `SETUP_TOKEN` após bootstrap.
+
 ## 14. Resposta a incidentes e operações administrativas
 
-O procedimento específico para apoiar a recuperação de acesso **sem bypass de autenticação** está em `docs/operations/admin-recovery.md`.
+Runbooks operacionais: `docs/operations/admin-recovery.md` (recuperação sem bypass), `docs/operations/deploy.md` (config de produção e publicação), `docs/operations/restore-drill.md` (backup/restauração) e `docs/operations/local-measurements.md` (medições locais e limitações).
 
 ### 14.1 Regras obrigatórias
 

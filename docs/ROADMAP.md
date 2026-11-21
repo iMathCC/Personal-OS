@@ -350,11 +350,23 @@ Ordem sugerida (uma entrega por módulo, com aceite próprio):
 
 **Fora do escopo das entregas 3, 4 e 5:** CRUD de objetivos/projetos/tarefas, motor de recomendações, export/restauração, R2, Cron Triggers, deploy e E2E browser-driven (Playwright). Finanças seguem fora da vertical slice.
 
-**Gate pendente:** CPU p95 em ambiente publicado ainda não medido; latências locais do spike, do health check e dos testes de integração não são CPU de produção. O gate da §7 permanece aberto.
+**Tarefa 1.2 — Entrega 6 (preparação operacional, validada localmente em 21/11/2026):**
+
+1. **Deploy configurável sem segredos no Git:** `apps/api/wrangler.toml` virou modelo com placeholders; `scripts/prepare-production-config.mjs` gera `apps/api/wrangler.production.toml` (gitignored, `0600`) a partir de `RP_ID`, `ORIGIN` e `D1_DATABASE_ID`; `check-production-config.mjs` valida placeholders, assets, bindings, `[secrets].required` e observabilidade. `wrangler deploy --dry-run` passou com valores sintéticos. **Nenhum deploy remoto foi executado.**
+2. **Worker + assets + D1 local:** config local de exemplo passou a servir assets com o mesmo roteamento de produção (`not_found_handling = single-page-application`, `run_worker_first = ["/api/*"]`). Deep links e fallback SPA verificados em Chromium e Firefox.
+3. **Backup/restauração verificável:** allowlist de 15 tabelas, seis tabelas sensíveis excluídas por política, manifest com contagens/migrações/SHA-256, restauração apenas em banco vazio. Drill em `/tmp/opencode/personal-os-drill-eRE495`: migrations em vazio, upgrade `0003` com dados, 15 tabelas/25 linhas exportadas, destruição isolada, restauração com checksum idêntico, 11/11 triggers, 0 FKs, seeds idempotentes. Runbook em `docs/operations/restore-drill.md`.
+4. **Auth real em navegador:** E2E com autenticador virtual CDP no Chromium cobriu setup, cookie `__Host-pos_session`, login, criação de curso/sessão, configurações, logout, limpeza de caches privados, login novamente, revogação de uma/todas as sessões, ausência de cookie e recuperação com dispositivo diferente. Passkey no Firefox está **explicitamente ignorado** por não haver autenticador virtual via CDP.
+5. **PWA/cache/offline:** service worker sem `runtimeCaching`, `cleanupOutdatedCaches`, limpeza que preserva apenas `workbox-precache-v2-*` e `Cache-Control: no-store, no-cache, must-revalidate` em todas as respostas de API. Offline carrega o shell precarregado e mostra erro de conexão; nenhum dado privado é cacheado.
+6. **Segurança/observabilidade:** logs estruturados com request ID, método, caminho sem query, status, duração e código de erro, sem cookies/tokens/IP/UA/corpo; `redact_query_string = true`, `invocation_logs = false`; CSP inalterada (violação benigna da sonda JIT do Zod no Firefox degrada para jitless).
+7. **Testes executados**: `npm run check` verde (domínio 34, web 32, API 81 — 147 no total —, lint, typecheck, format e build); `npm run test:integration` 24 testes; E2E 13 passed/1 skipped; `npm run backup:drill` verde; `npm audit --audit-level=high` sem high/critical (8 moderados em `glob`/`minimatch` via `vite-plugin-pwa`).
+8. **Medições locais:** HTTP p95 113 ms, p50 39 ms; spans D1 p95 23 ms; máximo 8 spans D1 por requisição (limite ≤ 8); bundle 129,86 kB gzip (limite 250 kB); detalhes e limitações em `docs/operations/local-measurements.md`.
+9. **Documentação/decisões:** runbooks `docs/operations/deploy.md`, `restore-drill.md` e `local-measurements.md`; `SECURITY.md`, `API_CONTRACTS.md` e este roadmap atualizados; [ADR-0014](decisions/0014-playwright-e2e.md) registra a justificativa da dependência Playwright (Apache-2.0, dev-only). ADR-0005/0008, D-11/D-13/D-14 seguem **não aprovados**.
+
+**Gate pendente:** CPU p95 em ambiente publicado ainda não medido; latências locais do spike, do health check, dos testes de integração e dos spans do explorer não são CPU de produção. O gate da §7 permanece aberto. Deploy, domínio, credenciais de produção e recursos remotos seguem bloqueados até autorização explícita.
 
 ### 9.3 Próximo passo
 
-Aguardar **revisão explícita das Entregas 3, 4 e 5**. A próxima tarefa da Tarefa 1.2 só será detalhada e iniciada após essa aprovação; não antecipar escopo, dependências ou schema além do já decidido em ADR. A aprovação de ADR-0005/ADR-0008 ou de D-11/D-13/D-14 é decisão humana separada.
+Aguardar **revisão explícita das Entregas 3, 4, 5 e 6** e autorização humana para publicar: definir `RP_ID`/`ORIGIN`/D1 remoto e segredos, aplicar migrações em workflow aprovado e executar `npm run deploy` conforme `docs/operations/deploy.md`. Até lá, nenhuma etapa remota, domínio/DNS, push, segredo de produção ou deleção de dados reais. A aprovação de ADR-0005/ADR-0008 ou de D-11/D-13/D-14 é decisão humana separada.
 
 ---
 
