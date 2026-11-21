@@ -47,12 +47,24 @@ describe('status das áreas do dashboard', () => {
     expect(deriveAreaStatus(overview, { health: degraded, counts })).toBe('no-data');
   });
 
+  it('distingue carregamento de ausência de dados na visão geral', () => {
+    const overview = NAVIGATION_ITEMS.find((item) => item.key === 'overview');
+    expect(overview).toBeDefined();
+    if (!overview) return;
+
+    expect(deriveAreaStatus(overview, { health: null, counts, loading: true })).toBe('loading');
+    expect(deriveAreaStatus(overview, { health: null, counts, loading: false })).toBe('no-data');
+    expect(deriveAreaStatus(overview, { health: healthy, counts, loading: true })).toBe('loading');
+    expect(deriveAreaStatus(overview, { health: healthy, counts, loading: false })).toBe('active');
+  });
+
   it('oferece rótulos estáveis para cada estado', () => {
     expect([
       areaStatusLabel('active'),
       areaStatusLabel('no-data'),
+      areaStatusLabel('loading'),
       areaStatusLabel('not-configured'),
       areaStatusLabel('planned'),
-    ]).toEqual(['Ativa', 'Sem dados', 'Não configurada', 'Em preparação']);
+    ]).toEqual(['Ativa', 'Sem dados', 'Carregando', 'Não configurada', 'Em preparação']);
   });
 });

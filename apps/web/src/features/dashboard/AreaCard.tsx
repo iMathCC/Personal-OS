@@ -11,6 +11,7 @@ interface AreaCardProps {
 const BADGE_CLASS: Record<AreaStatus, string> = {
   active: 'border-primary/30 bg-primary/10 text-primary',
   'no-data': 'border-border bg-muted/60 text-muted-foreground',
+  loading: 'border-primary/30 bg-primary/10 text-primary',
   'not-configured': 'border-border bg-muted/60 text-muted-foreground',
   planned: 'border-border bg-muted/60 text-muted-foreground',
 };

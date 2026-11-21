@@ -1,11 +1,13 @@
 import type { HealthResponse } from '@personal-os/shared';
 import type { NavigationItem } from '@/lib/navigation';
 
-export type AreaStatus = 'active' | 'no-data' | 'not-configured' | 'planned';
+export type AreaStatus = 'active' | 'no-data' | 'loading' | 'not-configured' | 'planned';
 
 export interface AreaStatusContext {
   readonly health: HealthResponse | null;
   readonly counts: { passkeys: number; activeSessions: number };
+  /** Distingue o carregamento inicial de uma resposta válida sem dados. */
+  readonly loading?: boolean;
 }
 
 /**
@@ -17,6 +19,7 @@ export function deriveAreaStatus(item: NavigationItem, context: AreaStatusContex
   if (item.availability === 'not-configured') return 'not-configured';
 
   if (item.key === 'overview') {
+    if (context.loading === true) return 'loading';
     if (context.health === null) return 'no-data';
     return context.health.status === 'ok' && context.health.db === 'ok' ? 'active' : 'no-data';
   }
@@ -34,6 +37,8 @@ export function areaStatusLabel(status: AreaStatus): string {
       return 'Ativa';
     case 'no-data':
       return 'Sem dados';
+    case 'loading':
+      return 'Carregando';
     case 'not-configured':
       return 'Não configurada';
     case 'planned':

@@ -9,6 +9,7 @@ import {
   NAVIGATION_GROUPS,
   type NavigationItem,
 } from '@/lib/navigation';
+import { nextFocusTarget } from './focus-trap';
 
 interface AppShellProps {
   user: UserDto;
@@ -76,7 +77,17 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const location = useLocation();
   const firstLink = useRef<HTMLAnchorElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  const background = useRef<HTMLDivElement>(null);
+  const sidebar = useRef<HTMLElement>(null);
   const current = findNavigationItem(location.pathname);
+
+  function closeMenu() {
+    setMenuOpen(false);
+    // Devolve o foco depois de o drawer ser removido do DOM.
+    requestAnimationFrame(() => trigger.current?.focus());
+  }
 
   // Fechar o drawer também no back/forward do navegador.
   /* eslint-disable react-hooks/set-state-in-effect -- reação a mudança de rota */
@@ -86,16 +97,35 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
-    if (menuOpen) firstLink.current?.focus();
-  }, [menuOpen]);
-
-  useEffect(() => {
     if (!menuOpen) return;
+    firstLink.current?.focus();
+    const container = dialog.current;
+    const shell = background.current;
+    const side = sidebar.current;
+    if (shell) shell.inert = true;
+    if (side) side.inert = true;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setMenuOpen(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeMenu();
+        return;
+      }
+      if (event.key !== 'Tab' || container === null) return;
+      const target = nextFocusTarget(
+        container,
+        document.activeElement instanceof HTMLElement ? document.activeElement : null,
+        event.shiftKey,
+      );
+      if (target === null) return;
+      event.preventDefault();
+      target.focus();
     }
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      if (shell) shell.inert = false;
+      if (side) side.inert = false;
+    };
   }, [menuOpen]);
 
   const firstName = user.displayName.trim().split(/\s+/u)[0] || user.displayName;
@@ -121,7 +151,10 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
         Ir para o conteúdo
       </a>
 
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 flex-col border-r border-border bg-card/70 px-4 py-6 lg:flex">
+      <aside
+        ref={sidebar}
+        className="fixed inset-y-0 left-0 z-20 hidden w-72 flex-col border-r border-border bg-card/70 px-4 py-6 lg:flex"
+      >
         <div className="flex items-center gap-3 px-2">
           <div
             aria-hidden="true"
@@ -159,7 +192,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
         </div>
       </aside>
 
-      <div className="lg:pl-72">
+      <div ref={background} className="lg:pl-72">
         <header className="sticky top-0 z-10 flex min-h-16 items-center gap-3 border-b border-border bg-background/95 px-4 backdrop-blur-sm sm:px-6">
           <Button
             type="button"
@@ -169,6 +202,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
             aria-label={menuOpen ? 'Fechar navegação' : 'Abrir navegação'}
             aria-expanded={menuOpen}
             aria-controls="mobile-navigation"
+            ref={trigger}
             onClick={() => setMenuOpen((open) => !open)}
           >
             <Icon name={menuOpen ? 'close' : 'menu'} size={20} />
@@ -195,9 +229,10 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
             type="button"
             aria-label="Fechar navegação"
             className="absolute inset-0 bg-black/70"
-            onClick={() => setMenuOpen(false)}
+            onClick={closeMenu}
           />
           <div
+            ref={dialog}
             id="mobile-navigation"
             role="dialog"
             aria-modal="true"
@@ -223,13 +258,13 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
                 size="icon"
                 className="min-h-11 min-w-11"
                 aria-label="Fechar navegação"
-                onClick={() => setMenuOpen(false)}
+                onClick={closeMenu}
               >
                 <Icon name="close" size={20} />
               </Button>
             </div>
             <div className="mt-8 flex-1 overflow-y-auto">
-              <NavigationLinks firstLinkRef={firstLink} onNavigate={() => setMenuOpen(false)} />
+              <NavigationLinks firstLinkRef={firstLink} onNavigate={closeMenu} />
             </div>
             {signOutError !== null && (
               <p className="mt-2 text-xs text-destructive" role="alert">
@@ -241,7 +276,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
               variant="outline"
               className="mt-4 min-h-11 w-full"
               onClick={() => {
-                setMenuOpen(false);
+                closeMenu();
                 void handleSignOut();
               }}
               disabled={signingOut}

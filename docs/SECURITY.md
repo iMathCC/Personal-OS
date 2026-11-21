@@ -278,7 +278,7 @@ upgrade-insecure-requests;
 - Cache do service worker limpo no logout; `/api/v1/auth/*` nunca é cacheado; caches privados (`api-get-v1*`, `private-*`) são removidos ao encerrar a sessão.
 - Aviso de sessão expirada e redirecionamento seguro (sem open redirect; validar `returnTo` interno).
 - Estado autenticado obtido somente por `GET /auth/me`: `401` leva à tela de login com aviso de sessão expirada; falha de rede mostra erro com retry e nunca libera o shell. O shell e o dashboard não leem cookies nem armazenam tokens; nenhum dado de domínio é inferido no cliente.
-- Caches do service worker e DTOs de `/api/v1` são tratados como dados privados; os 10 itens de navegação sem módulo implementado não renderizam formulários que possam enviar dados a endpoints inexistentes.
+- Caches do service worker e DTOs de `/api/v1` são tratados como dados privados; os 8 itens de navegação sem módulo implementado não renderizam formulários que possam enviar dados a endpoints inexistentes.
 
 ---
 

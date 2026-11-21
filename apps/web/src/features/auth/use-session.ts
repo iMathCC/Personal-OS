@@ -1,6 +1,6 @@
 import type { UserDto } from '@personal-os/shared';
-import { useCallback, useEffect, useState } from 'react';
-import { ApiError, authApi, clearPrivateCaches } from '@/lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ApiError, authApi, clearPrivateCaches, subscribeToUnauthorized } from '@/lib/api';
 
 export interface AccountSummary {
   user: UserDto;
@@ -28,20 +28,32 @@ function failureMessage(error: unknown): string {
 
 export function useSession(): SessionController {
   const [state, setState] = useState<SessionState>({ status: 'loading' });
+  const invalidated = useRef(false);
+
+  // Uma única transição, mesmo com vários 401 simultâneos.
+  const invalidate = useCallback(() => {
+    if (invalidated.current) return;
+    invalidated.current = true;
+    void clearPrivateCaches();
+    setState({ status: 'anonymous' });
+  }, []);
+
+  useEffect(() => subscribeToUnauthorized(invalidate), [invalidate]);
 
   const refresh = useCallback(async () => {
     setState({ status: 'loading' });
     try {
       const account = await authApi.me();
+      invalidated.current = false;
       setState({ status: 'authenticated', ...account });
     } catch (error) {
-      setState(
-        error instanceof ApiError && error.status === 401
-          ? { status: 'anonymous' }
-          : { status: 'error', message: failureMessage(error) },
-      );
+      if (error instanceof ApiError && error.status === 401) {
+        invalidate();
+      } else {
+        setState({ status: 'error', message: failureMessage(error) });
+      }
     }
-  }, []);
+  }, [invalidate]);
 
   // O cookie HttpOnly não é legível pelo JS; a sessão só é conhecida após /auth/me.
   useEffect(() => {
@@ -49,26 +61,36 @@ export function useSession(): SessionController {
     void authApi
       .me()
       .then((account) => {
-        if (!cancelled) setState({ status: 'authenticated', ...account });
+        if (!cancelled) {
+          invalidated.current = false;
+          setState({ status: 'authenticated', ...account });
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) return;
-        setState(
-          error instanceof ApiError && error.status === 401
-            ? { status: 'anonymous' }
-            : { status: 'error', message: failureMessage(error) },
-        );
+        if (error instanceof ApiError && error.status === 401) {
+          invalidate();
+        } else {
+          setState({ status: 'error', message: failureMessage(error) });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [invalidate]);
 
   const signOut = useCallback(async (all: boolean) => {
-    if (all) {
-      await authApi.logoutAll();
-    } else {
-      await authApi.logout();
+    try {
+      if (all) {
+        await authApi.logoutAll();
+      } else {
+        await authApi.logout();
+      }
+    } catch (error) {
+      // 401 no logout significa que a sessão já não é válida; conclui localmente.
+      if (!(error instanceof ApiError && error.status === 401)) throw error;
+    } finally {
+      invalidated.current = true;
     }
     await clearPrivateCaches();
     setState({ status: 'anonymous' });

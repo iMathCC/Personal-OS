@@ -56,7 +56,11 @@ export function DashboardPage({ account }: DashboardPageProps) {
             <AreaCard
               key={item.key}
               item={item}
-              status={deriveAreaStatus(item, { health, counts: account.counts })}
+              status={deriveAreaStatus(item, {
+                health,
+                counts: account.counts,
+                loading: state.status === 'loading',
+              })}
             />
           ))}
         </div>

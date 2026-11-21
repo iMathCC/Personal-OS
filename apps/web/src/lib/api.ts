@@ -30,6 +30,30 @@ interface Envelope<T> {
 /** Token em memória: nunca em localStorage/sessionStorage. */
 let csrfToken: string | null = null;
 
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+/** Canal explícito entre o cliente HTTP e a sessão; evita dependência circular. */
+export function subscribeToUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+
+/**
+ * Endpoints que exigem sessão ativa. Rotas públicas de setup/login/recuperação
+ * podem devolver 401 como parte normal do fluxo e não devem invalidar a sessão.
+ */
+function isProtectedPath(path: string): boolean {
+  if (path === '/auth/me' || path === '/auth/sessions') return true;
+  if (path === '/auth/logout' || path === '/auth/logout-all') return true;
+  return path.startsWith('/auth/sessions/');
+}
+
+function notifyUnauthorized(path: string, status: number): void {
+  if (status !== 401 || !isProtectedPath(path)) return;
+  for (const listener of unauthorizedListeners) listener();
+}
+
 export function setCsrfToken(token: string | null): void {
   csrfToken = token;
 }
@@ -42,7 +66,9 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
     signal,
   });
   if (!response.ok) {
-    throw await toApiError(response);
+    const error = await toApiError(response);
+    notifyUnauthorized(path, error.status);
+    throw error;
   }
   return ((await response.json()) as Envelope<T>).data;
 }
@@ -87,7 +113,9 @@ async function mutate<T>(
     body: JSON.stringify(body),
   });
   if (!response.ok) {
-    throw await toApiError(response);
+    const error = await toApiError(response);
+    notifyUnauthorized(path, error.status);
+    throw error;
   }
   return ((await response.json()) as Envelope<T>).data;
 }
@@ -104,7 +132,9 @@ async function remove<T>(path: string): Promise<T> {
     },
   });
   if (!response.ok) {
-    throw await toApiError(response);
+    const error = await toApiError(response);
+    notifyUnauthorized(path, error.status);
+    throw error;
   }
   return ((await response.json()) as Envelope<T>).data;
 }
