@@ -4,6 +4,7 @@ import type { ErrorHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { AppEnv } from '../env';
+import { securityLogFields } from './observability';
 
 const CODE_BY_STATUS: Record<number, ErrorCode> = {
   400: 'VALIDATION_ERROR',
@@ -19,6 +20,10 @@ const CODE_BY_STATUS: Record<number, ErrorCode> = {
   503: 'DEPENDENCY_UNAVAILABLE',
 };
 
+function httpStatusIsAuthFailure(status: number): boolean {
+  return status === 401 || status === 403;
+}
+
 const STATUS_BY_DOMAIN_CODE: Record<DomainError['code'], ContentfulStatusCode> = {
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
@@ -32,9 +37,40 @@ const STATUS_BY_DOMAIN_CODE: Record<DomainError['code'], ContentfulStatusCode> =
 
 export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const requestId = c.get('requestId') ?? 'unknown';
-  const code: ErrorCode = err instanceof DomainError ? err.code : 'INTERNAL_ERROR';
+  const code: ErrorCode =
+    err instanceof DomainError
+      ? err.code
+      : err instanceof HTTPException
+        ? (CODE_BY_STATUS[err.status] ?? 'INTERNAL_ERROR')
+        : 'INTERNAL_ERROR';
   const status = err instanceof DomainError ? STATUS_BY_DOMAIN_CODE[err.code] : 500;
   const details = err instanceof DomainError ? err.details : undefined;
+  const effectiveStatus = err instanceof HTTPException ? err.status : status;
+  c.set('errorCode', code);
+
+  if (code === 'DEPENDENCY_UNAVAILABLE') {
+    console.error(
+      JSON.stringify(
+        securityLogFields('dependency_unavailable', {
+          requestId,
+          path: c.req.path,
+          status: effectiveStatus,
+          code,
+        }),
+      ),
+    );
+  } else if (httpStatusIsAuthFailure(effectiveStatus)) {
+    console.warn(
+      JSON.stringify(
+        securityLogFields('auth_failure', {
+          requestId,
+          path: c.req.path,
+          status: effectiveStatus,
+          code,
+        }),
+      ),
+    );
+  }
 
   if (err instanceof HTTPException) {
     const httpStatus = err.status;

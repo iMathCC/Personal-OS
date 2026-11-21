@@ -34,5 +34,7 @@ export type AppEnv = {
     ipHash: string;
     csrfToken: string | null;
     authFailure: boolean;
+    /** Código estável do erro, usado apenas em logs estruturados. */
+    errorCode: string | null;
   };
 };

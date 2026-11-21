@@ -37,20 +37,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            // Rotas de autenticação nunca entram no cache do service worker.
-            urlPattern: ({ url }) =>
-              url.pathname.startsWith('/api/v1/') && !url.pathname.startsWith('/api/v1/auth/'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-get-v1',
-              networkTimeoutSeconds: 3,
-              expiration: { maxEntries: 100, maxAgeSeconds: 300 },
-              cacheableResponse: { statuses: [200] },
-            },
-          },
-        ],
+        // Nenhuma resposta de API entra no cache: todas contêm dados privados.
+        // Apenas assets versionados são precarregados.
+        cleanupOutdatedCaches: true,
       },
       devOptions: { enabled: false },
     }),

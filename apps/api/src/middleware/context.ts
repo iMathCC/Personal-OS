@@ -53,6 +53,7 @@ export const apiContext = createMiddleware<AppEnv>(async (c, next) => {
   c.set('sessionTokenHash', sessionTokenHash);
   c.set('csrfToken', cookies[CSRF_COOKIE] ?? null);
   c.set('authFailure', false);
+  c.set('errorCode', null);
 
   await next();
 

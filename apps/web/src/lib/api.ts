@@ -290,13 +290,15 @@ async function refreshCsrfAfterAuth(): Promise<void> {
 /** Remove caches privados ao encerrar a sessão. */
 export async function clearPrivateCaches(): Promise<void> {
   setCsrfToken(null);
-  if (!('caches' in globalThis)) {
+  if (typeof caches === 'undefined') {
     return;
   }
   const names = await caches.keys();
   await Promise.all(
+    // Preserva somente o precache de assets do Workbox. Qualquer outro cache
+    // pode conter respostas privadas de versões anteriores da aplicação.
     names
-      .filter((name) => name.startsWith('api-get-v1') || name.startsWith('private-'))
+      .filter((name) => !name.startsWith('workbox-precache-v2-'))
       .map((name) => caches.delete(name)),
   );
 }

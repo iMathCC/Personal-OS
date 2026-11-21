@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv } from './env';
 import { bodyLimit } from './middleware/body-limit';
+import { noStore } from './middleware/cache';
 import { apiContext } from './middleware/context';
 import { originAndCsrf } from './middleware/csrf';
 import { errorHandler } from './middleware/error';
+import { requestLogging } from './middleware/observability';
 import { requestId } from './middleware/request-id';
 import { authRoutes } from './modules/auth/routes';
 import { healthRoutes } from './modules/health/routes';
@@ -15,6 +17,8 @@ export function createApp() {
 
   app.onError(errorHandler);
   app.use('/api/v1/*', requestId);
+  app.use('/api/v1/*', requestLogging);
+  app.use('/api/v1/*', noStore);
   app.use('/api/v1/*', secureHeaders());
   app.use('/api/v1/*', apiContext);
   app.use('/api/v1/*', bodyLimit);
