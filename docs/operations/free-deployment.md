@@ -282,8 +282,8 @@ Somente com autorização explícita e **depois** de exportar/backup confirmado:
 
 ## 15. Estado da Entrega 9 — hardening local (sem deploy)
 
-Esta seção registra o que foi preparado e validado localmente na Entrega 9. **Nenhuma dessas mudanças foi publicada:**
-a versão em produção continua sendo `62f512ad-8778-4622-a787-979b3d5499be`.
+Esta seção registra o que foi preparado na Entrega 9 e **publicado na Entrega 10**. Até a Delivery 9 as mudanças
+eram locais e a versão em produção era `62f512ad-8778-4622-a787-979b3d5499be`; o estado atual está na §16.
 
 ### 15.1 Política HSTS
 
@@ -295,10 +295,11 @@ a versão em produção continua sendo `62f512ad-8778-4622-a787-979b3d5499be`.
 - **Antes:** `/api/v1/health` e demais rotas da API já emitiam HSTS (o middleware `secureHeaders()` do Hono 4.13
   usa exatamente esse valor por padrão), mas o HTML e os assets servidos pelo Static Assets **não** emitiam — as
   regras em `apps/web/public/_headers` não continham a diretiva. A resposta HTML em produção confirmou a ausência.
-- **Depois (local):** `Strict-Transport-Security` passa a constar em `apps/web/public/_headers` (aplicável a HTML e
-  assets) e o Worker aplica o middleware `hsts` globalmente, cobrindo também `notFound` e erros que não passam
-  pelos middlewares restritos a `/api/v1/*`. Nenhum header existente (CSP, `X-Content-Type-Options`,
-  `Referrer-Policy`, `Cache-Control`, etc.) foi removido.
+- **Depois (publicado na Entrega 10):** `Strict-Transport-Security` consta em `apps/web/public/_headers` (aplicável a
+  HTML e assets) e o Worker aplica o middleware `hsts` globalmente, cobrindo também `notFound` e erros que não
+  passam pelos middlewares restritos a `/api/v1/*`. Nenhum header existente (CSP, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Cache-Control`, etc.) foi removido. Conferido em produção em `/`, health, 401, 403, 404 e
+  asset estático.
 - Evidência: `apps/api/test/security-headers.test.ts` cobre health, erro 403 e rota inexistente;
   `scripts/check-production-config.mjs` falha se `apps/web/dist/_headers` não contiver a diretiva.
 
@@ -309,8 +310,10 @@ a versão em produção continua sendo `62f512ad-8778-4622-a787-979b3d5499be`.
 - O objetivo é reduzir a superfície pública: URLs de preview temporárias de branches não são necessárias para
   uso pessoal. `workers_dev = true`, a URL principal, `RP_ID` e `ORIGIN` permanecem inalterados; nenhum domínio
   customizado foi criado e o roteamento de assets não mudou.
-- **Efeito remoto pendente:** a config publicada ainda não contém a propriedade. Ela só passa a valer após um
-  novo deploy autorizado (ver §15.6).
+- **Efeito remoto aplicado na Entrega 10:** o deploy com `preview_urls = false` não emitiu o aviso que apareceu na
+  Delivery 8 (“Because your 'workers.dev' route is enabled and your 'preview_urls' setting is not in your
+  wrangler.production.toml, Preview URLs will be enabled for this deployment by default”). `workers_dev = true` e
+  a URL principal seguem intactos.
 
 ### 15.3 Diagnóstico de CPU
 
@@ -402,6 +405,64 @@ recente: `1bf09d5` (schema e migration 0003), `26c8ba2` (regras de studies), `99
 (runbook de publicação gratuita). O tracking local `origin/main` aponta para o merge-base, mas o remoto real
 também está nesse commit — ou seja, o repositório remoto está 9 commits **atrás** do local, sem divergência de
 histórico. A decisão de como sincronizar fica com o usuário.
+
+## 16. Entrega 10 — sincronização, deploy e preparação do primeiro acesso
+
+### 16.1 Git
+
+- HEAD local e `origin/main` após o push: `5de3839a7bdcb4b0bd9521ddb597815606eb0c49` (árvore limpa, divergência `0 0`).
+- Foram sincronizados os nove commits da Entrega 9 (`1bf09d5` … `414d8fe`) **mais** o commit `5de3839`, que
+  versionou o hardening HSTS/Preview URLs e a documentação da Entrega 9 — necessário para publicar essas mudanças
+  e deixar a árvore limpa. Push normal (`git push origin main`), sem force, sem merge/rebase/reset.
+- Verificação de secrets: nenhum valor real no histórico; somente placeholders `REPLACE_WITH_*` e valores dummy
+  explícitos de teste (`browser-setup-token`, `browser-csrf-secret-not-for-production`,
+  `browser-ip-salt-not-for-production`). `apps/api/wrangler.production.toml` permanece ignorado (`.gitignore:21`).
+
+### 16.2 Backup e deploy
+
+- Backup remoto preventivo: `/tmp/opencode/personal-os-backup-predeploy-d10-20261121T172045Z`, 15 tabelas da
+  allowlist, 14 linhas, 6 tabelas sensíveis excluídas, migrations `0000`–`0003` registradas. SHA-256 de `data.sql`
+  `cc3619960953b81993f1171d1a160e6b086e2f6c9f140b5647555a1c66a6b768` conferido. Nenhum restore executado.
+- Versão publicada antes: `62f512ad-8778-4622-a787-979b3d5499be`. Versão do deploy do hardening:
+  `49b1c882-2672-472e-9128-e2f7037aecec`. A rotação de `SETUP_TOKEN` gerou a versão de secret
+  `57e0298d-a370-49c0-8f82-8ff7c1ac2f93`, que é a versão ativa atual.
+- Não houve criação de Worker ou D1, alteração de migrations, substituição de `CSRF_SECRET`/`IP_HASH_SALT`,
+  contratação, cartão, cobrança ou push force.
+
+### 16.3 Validação pós-deploy
+
+- HSTS `max-age=15552000; includeSubDomains` presente em `/`, `/api/v1/health`, `/auth/me` (401), erro 403, erro
+  404 e asset `/assets/*`; CSP e demais headers mantidos; `Cache-Control: no-store` na API inclusive em erros.
+- `/estudos` e `/configuracoes` carregam via fallback SPA; `/sw.js`, manifesto e ícones respondem 200; o SW não
+  guarda respostas de API (apenas precache do shell; `/api/` está no denylist).
+- CSRF obrigatório: mutação sem token → 403. Origem hostil (`https://evil.example.com`) com token válido → 403.
+- `health` reporta `db: ok`. D1 remoto: `No migrations to apply!`.
+- `setup/options` sem token e com token inválido → 403; `login/options` com `rpId =
+  personal-os.imathscc.workers.dev` e 0 credenciais; nenhum cookie `__Host-pos_session` emitido.
+- Consultas somente leitura no D1 remoto confirmam **0 usuários e 0 passkeys**. Nenhum dado pessoal foi inserido.
+
+### 16.4 Novo `SETUP_TOKEN`
+
+Gerado com `openssl rand -hex 32` (256 bits) e enviado diretamente por stdin a
+`wrangler secret put SETUP_TOKEN --name personal-os`. O valor não foi exibido, gravado em arquivo, passado como
+argumento de processo nem registrado em log — o log de saída contém apenas a confirmação de upload. Os três secrets
+presentes no Worker, conferidos **por nome**: `CSRF_SECRET`, `IP_HASH_SALT`, `SETUP_TOKEN`. O valor do novo token
+deve ser lido pelo próprio usuário no Dashboard do Worker ou com `wrangler secret get` em terminal local seguro.
+
+### 16.5 Estado do primeiro acesso
+
+O ambiente está preparado, mas **o setup não foi concluído**: não há usuário, passkey, sessão pessoal nem dado
+pessoal em produção. O primeiro registro de passkey exige autorização separada.
+
+### 16.6 Limitações restantes
+
+- A API de billing retorna `403 / erro 10000`; plano Free confirmado pelo usuário no Dashboard, mas método de
+  pagamento/cobrança automática não é verificável por API.
+- A desativação de Preview URLs foi confirmada por evidência de deploy (ausência do aviso) e config publicada; a conferência
+  visual no Dashboard não foi feita nesta entrega.
+- `/studies/*` ainda não tem rate limit de aplicação por usuário (documentado em [SECURITY.md](../SECURITY.md));
+  não foi alterado nesta entrega.
+- CPU p95 em ambiente publicado segue sem medição conclusiva; nenhuma otimização foi aplicada.
 
 ## Referências
 

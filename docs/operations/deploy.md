@@ -129,3 +129,15 @@ Validações locais da Entrega 9: `npm run check` (34 domínio + 32 web + 82 API
    que o aviso de Preview URLs desapareceu; registrar a nova versão publicada neste runbook.
 8. O registro real de passkey e o primeiro acesso continuam exigindo autorização separada e o `SETUP_TOKEN`,
    que não foi preservado localmente.
+
+### Resultado da Entrega 10
+
+O procedimento acima foi executado com autorização explícita. HEAD sincronizado:
+`5de3839a7bdcb4b0bd9521ddb597815606eb0c49` (push normal, sem force). Backup remoto preventivo em
+`/tmp/opencode/personal-os-backup-predeploy-d10-20261121T172045Z`. Versão do deploy do hardening:
+`49b1c882-2672-472e-9128-e2f7037aecec`; versão ativa após a rotação de `SETUP_TOKEN`:
+`57e0298d-a370-49c0-8f82-8ff7c1ac2f93`. O deploy não emitiu o aviso de Preview URLs da Delivery 8.
+Novo `SETUP_TOKEN` de 256 bits configurado por stdin, sem exibição nem registro do valor; os outros dois secrets
+foram preservados. HSTS confirmado em produção em `/`, health, 401, 403, 404 e assets. D1 com 0 usuários e
+0 passkeys — o primeiro acesso segue aguardando autorização separada. Detalhes em
+[free-deployment.md](free-deployment.md) §16.
