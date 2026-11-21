@@ -17,6 +17,10 @@ describe('headers de segurança da API', () => {
     expect(response.headers.get('pragma')).toBe('no-cache');
     expect(response.headers.get('x-request-id')).toMatch(/^req_/);
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(response.headers.get('strict-transport-security')).toBe(
+      'max-age=15552000; includeSubDomains',
+    );
+    expect(response.headers.get('strict-transport-security')).not.toContain('preload');
   });
 
   it('aplica as mesmas regras a respostas de erro autenticado', async () => {
@@ -42,8 +46,20 @@ describe('headers de segurança da API', () => {
 
     expect(response.status).toBe(403);
     expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(response.headers.get('strict-transport-security')).toBe(
+      'max-age=15552000; includeSubDomains',
+    );
     for (const line of logs) {
       expect(line).not.toContain('SENSITIVE_MARKER');
     }
+  });
+
+  it('mantém HSTS em rotas que caem no notFound', async () => {
+    const response = await app.request(`${ORIGIN}/api/inexistente`, {}, env);
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('strict-transport-security')).toBe(
+      'max-age=15552000; includeSubDomains',
+    );
   });
 });

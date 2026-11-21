@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkRenderedConfig, readText } from './lib/config-validation.mjs';
@@ -18,6 +18,17 @@ const { errors, warnings } = checkRenderedConfig(readText(configPath));
 const dist = resolve(root, 'apps/web/dist');
 for (const asset of ['index.html', '_headers', 'sw.js', 'manifest.webmanifest']) {
   if (!existsSync(resolve(dist, asset))) errors.push(`Build ausente: apps/web/dist/${asset}`);
+}
+
+const configText = readText(configPath);
+if (!/^preview_urls\s*=\s*false\s*$/m.test(configText)) {
+  errors.push('Preview URLs não desativadas (preview_urls = false).');
+}
+if (existsSync(resolve(dist, '_headers'))) {
+  const headersText = readFileSync(resolve(dist, '_headers'), 'utf8');
+  if (!/Strict-Transport-Security:\s*max-age=15552000;\s*includeSubDomains/.test(headersText)) {
+    errors.push('HSTS ausente ou com política diferente em apps/web/dist/_headers.');
+  }
 }
 
 for (const warning of warnings) console.warn(`AVISO: ${warning}`);

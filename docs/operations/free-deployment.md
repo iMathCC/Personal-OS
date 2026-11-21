@@ -5,10 +5,13 @@ Este runbook cobre a publicação do Personal OS **somente com recursos gratuito
 recurso necessário deixar de caber no plano gratuito, **pare e peça autorização** — nunca faça fallback automático
 para um plano pago.
 
-Estado desta preparação: conta Cloudflare **não autenticada** neste ambiente (`npx wrangler whoami --json` retornou
-`{"loggedIn": false}`; `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID` ausentes). Nenhum Worker, banco, secreto,
-domínio, DNS, migration remota ou deploy foi criado. A configuração efetiva em
-`apps/api/wrangler.production.toml` contém **valores sintéticos** e não deve receber credenciais reais.
+Estado atual: a conta Cloudflare foi autenticada via OAuth, o subdomínio `imathscc` está ativo e o Worker
+`personal-os` foi publicado em `https://personal-os.imathscc.workers.dev` (Delivery 8, versão
+`62f512ad-8778-4622-a787-979b3d5499be`). O D1 `personal-os` existe com as migrations `0000`–`0003` aplicadas.
+Os três segredos estão configurados **somente no Worker remoto**; valores não são registrados aqui nem no Git.
+O plano Free foi confirmado pelo usuário no Dashboard. A configuração efetiva
+`apps/api/wrangler.production.toml` (gitignored) contém o UUID real do D1 e `RP_ID`/`ORIGIN` do hostname publicado.
+O estado detalhado da Entrega 9 — incluindo hardening local ainda não publicado — está na §15.
 
 ## 1. Arquitetura de publicação gratuita
 
@@ -276,6 +279,129 @@ Somente com autorização explícita e **depois** de exportar/backup confirmado:
 5. Rotacione `SETUP_TOKEN` e quaisquer segredos que tenham circulado; confirme que a conta permanece no Free e sem
    cobrança. A remoção do Worker remove também seus secrets.
 6. Nenhuma dessas operações foi executada nesta preparação.
+
+## 15. Estado da Entrega 9 — hardening local (sem deploy)
+
+Esta seção registra o que foi preparado e validado localmente na Entrega 9. **Nenhuma dessas mudanças foi publicada:**
+a versão em produção continua sendo `62f512ad-8778-4622-a787-979b3d5499be`.
+
+### 15.1 Política HSTS
+
+- Valor adotado: `Strict-Transport-Security: max-age=15552000; includeSubDomains` (180 dias, acima do mínimo de
+  seis meses da [SECURITY.md](../SECURITY.md)). **Sem `preload`** — a inclusão na lista do navegador é difícil de
+  reverter e exigiria decisão separada.
+- `includeSubDomains` é seguro aqui porque o hostname é dedicado (`personal-os.imathscc.workers.dev`) e não há
+  outros subdomínios sob ele cuja política seria alterada. Não há domínio customizado na conta para este Worker.
+- **Antes:** `/api/v1/health` e demais rotas da API já emitiam HSTS (o middleware `secureHeaders()` do Hono 4.13
+  usa exatamente esse valor por padrão), mas o HTML e os assets servidos pelo Static Assets **não** emitiam — as
+  regras em `apps/web/public/_headers` não continham a diretiva. A resposta HTML em produção confirmou a ausência.
+- **Depois (local):** `Strict-Transport-Security` passa a constar em `apps/web/public/_headers` (aplicável a HTML e
+  assets) e o Worker aplica o middleware `hsts` globalmente, cobrindo também `notFound` e erros que não passam
+  pelos middlewares restritos a `/api/v1/*`. Nenhum header existente (CSP, `X-Content-Type-Options`,
+  `Referrer-Policy`, `Cache-Control`, etc.) foi removido.
+- Evidência: `apps/api/test/security-headers.test.ts` cobre health, erro 403 e rota inexistente;
+  `scripts/check-production-config.mjs` falha se `apps/web/dist/_headers` não contiver a diretiva.
+
+### 15.2 Política de Preview URLs
+
+- `preview_urls = false` foi adicionado ao modelo `apps/api/wrangler.toml` e está presente na config efetiva
+  gerada. A versão instalada do Wrangler (4.166.0) suporta a propriedade.
+- O objetivo é reduzir a superfície pública: URLs de preview temporárias de branches não são necessárias para
+  uso pessoal. `workers_dev = true`, a URL principal, `RP_ID` e `ORIGIN` permanecem inalterados; nenhum domínio
+  customizado foi criado e o roteamento de assets não mudou.
+- **Efeito remoto pendente:** a config publicada ainda não contém a propriedade. Ela só passa a valer após um
+  novo deploy autorizado (ver §15.6).
+
+### 15.3 Diagnóstico de CPU
+
+- Amostra da Delivery 8: p50 ≈ 6,2 ms, p99 ≈ 16,1 ms em **15 requisições**, zero erros `1102`. O painel usa
+  GraphQL em µs; os valores convertidos para ms são estimativas amostradas, não medição de billing nem prova de
+  violação do limite de 10 ms/invocação.
+- Revisão de código (sem carga em produção): os trabalhos síncrono/criptográfico relevantes são `crypto.randomUUID`
+  por request, SHA-256 do IP em toda requisição, SHA-256 do token de sessão quando há cookie, HMAC-SHA-256 de CSRF
+  em mutações, `JSON.parse`/Zod no corpo e verificação ECDSA P-256 **apenas** em `setup/verify`, `login/verify` e
+  `recovery/register/verify`. Não há `SELECT *` em produção; as consultas usam colunas explícitas e índices.
+- Inicialização estática (Hono, Zod, `@simplewebauthn/server`, dialect do Drizzle) é paga no cold start. É uma
+  explicação plausível para um p99 alto em amostra pequena, **não uma causa comprovada**.
+- Com 15 amostras, p99 equivale praticamente ao máximo: um único cold start explica 16,1 ms. O único instrumento
+  do app mede latência de parede (`durationMs`), não CPU por rota, e não há medição de CPU p95 publicada.
+  Amostragem adaptativa do painel não é verificável daqui.
+- **Conclusão:** não há evidência suficiente para otimizar. Nenhuma mudança de performance foi feita; o gate de CPU
+  do roadmap permanece aberto. Observações documentadas para medição futura: a validação de sessão roda em rotas
+  públicas quando há cookie e `/auth/me` pode emitir 9 instruções SQL se o refresh de `last_seen` disparar
+  (não se sabe se `batch()` conta como um span no explorer local).
+
+### 15.4 Estado da validação da autenticação em produção
+
+Executado contra `https://personal-os.imathscc.workers.dev` **sem registrar passkey e sem conhecer `SETUP_TOKEN`**:
+
+| Verificação | Resultado |
+| --- | --- |
+| `GET /` (HTML publicado) | 200; HSTS ausente antes da correção (ver §15.1) |
+| `GET /api/v1/health` | 200; HSTS presente |
+| `GET /api/v1/auth/csrf` | 200; emite `pos_vid` e `pos_csrf`, nenhum cookie de sessão |
+| `POST /auth/setup/options` com `X-Setup-Token` inválido | 403 `FORBIDDEN` — token não vazou, nenhuma challenge criada |
+| `POST /auth/login/options` | 200; `rpId = personal-os.imathscc.workers.dev`, `userVerification = required`, 0 credenciais (conta ainda não existe) |
+| `GET /auth/me` sem sessão | 401 `UNAUTHENTICATED` |
+| `POST /auth/recovery/verify` com código inválido | 400 `VALIDATION_ERROR`; nenhuma sessão criada |
+| Cookie `__Host-pos_session` | **não** emitido em nenhum probe |
+
+O hostname publicado é compatível com WebAuthn (RP ID completo de três rótulos, conforme §1). **Não foi possível
+validar o registro real sem criar credencial** — isso exige autorização explícita e o valor de `SETUP_TOKEN`.
+Localmente, a jornada completa foi executada com autenticador virtual: Chromium 7/7 testes (incluindo setup, login,
+estudos, logout, revogação e recuperação) e Firefox 6/6 + 1 skip (o autenticador virtual via CDP só existe no
+Chromium). O teste E2E depende de `npm run test:e2e:env -- --reset` + servidor local ativo em
+`https://localhost:8788`; sem o servidor, os testes falham com `ECONNREFUSED`.
+
+### 15.5 Limitações conhecidas de produção
+
+- A versão publicada **não contém** HSTS em HTML/assets nem `preview_urls = false` (§15.1, §15.2).
+- Não há passkey registrada nem conta criada em produção; o fluxo real de primeiro acesso segue pendente.
+- O valor de `SETUP_TOKEN` não foi preservado localmente após o bootstrap; ele existe apenas no Worker remoto.
+  Para o primeiro acesso será necessário recuperá-lo de forma segura ou rotacioná-lo (rotação é mudança de segredo
+  e exige autorização).
+- A API de billing retorna `403 / erro 10000`, então método de pagamento/cobrança automática não é verificável
+  por API; o plano Free foi confirmado pelo usuário no Dashboard.
+- Divergências documentais corrigidas nesta entrega: `requestOrigin()` usa `Referer` como fallback apenas na
+  comparação de origem (o token CSRF continua obrigatório) e o rate limit por usuário ainda não cobre `/studies/*`
+  (ver [SECURITY.md](../SECURITY.md) §2.4 e §2.5).
+- `recoveryVerify` revoga sessões no D1 mas não emite `clearSessionCookie`; o frontend trata o 401 resultante e
+  limpa caches/CSRF. `loginOptions` com zero credenciais e mensagens distintas em `loginVerify` são oráculos
+  limitados, mitigados pelo rate limit por IP.
+
+### 15.6 Procedimento de deploy seguro (somente após autorização)
+
+1. Confirmar que as mudanças locais foram revisadas e que os testes estão verdes (`npm run check`, integração D1,
+   `npm run deploy:check`, dry-run, E2E local) e registrar o HEAD exato.
+2. Fazer backup lógico local do D1 (`npm run backup:d1`) e conferir o manifesto/_SHA-256_. Nenhum restore é feito.
+3. Gerar a config efetiva com `npm run deploy:prepare` (RP_ID/ORIGIN/UUID já conhecidos) e validar com
+   `npm run deploy:check`. Conferir que `preview_urls = false` e `workers_dev = true` estão presentes.
+4. `npx wrangler deploy --config apps/api/wrangler.production.toml --dry-run` como última checagem local.
+5. **Somente com autorização explícita:** `npm run deploy`. Não criar recursos, não alterar migrations, não tocar
+   em segredos, não fazer push.
+6. Após publicar: verificar HTML e API com `curl -D`, confirmar HSTS em ambos, checar o aviso de Preview URLs no
+   output, validar `/api/v1/health` e `/auth/csrf`, e registrar a nova versão retornada pelo Wrangler.
+7. **Não** registrar passkey real sem autorização separada e sem o `SETUP_TOKEN` disponível de forma segura.
+
+### 15.7 Rastreabilidade Git ↔ versão publicada
+
+| Item | Valor |
+| --- | --- |
+| HEAD local (antes desta entrega) | `414d8fe46cf0557ecb892759bf2740c051d85690` |
+| `origin/main` real (`git ls-remote`) | `19c0571467bba93af3adff5a82a141cefdec3f1f` |
+| Divergência | `9 0` — nove commits apenas locais, **nenhum** commit exclusivo remoto |
+| Merge-base | `19c0571467bba93af3adff5a82a141cefdec3f1f` |
+| Versão publicada (Delivery 8) | `62f512ad-8778-4622-a787-979b3d5499be` |
+| Código publicado | corresponde ao estado local ao final da Delivery 8; os nove commits locais incluem aquele estado |
+| Push / merge / rebase / reset | **não executados** |
+
+A divergência não foi resolvida automaticamente. Os nove commits exclusivos locais são, do mais antigo ao mais
+recente: `1bf09d5` (schema e migration 0003), `26c8ba2` (regras de studies), `995438a` (módulo studies na API),
+`d3ada1a` (página de estudos), `1fac1e6` (documentação das entregas 5–6), `080301b` (no-store e observabilidade),
+`fa5e82b` (config de deploy guardada, drill de backup e E2E), `cc86bce` (runbooks e ADR-0014) e `414d8fe`
+(runbook de publicação gratuita). O tracking local `origin/main` aponta para o merge-base, mas o remoto real
+também está nesse commit — ou seja, o repositório remoto está 9 commits **atrás** do local, sem divergência de
+histórico. A decisão de como sincronizar fica com o usuário.
 
 ## Referências
 

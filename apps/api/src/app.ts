@@ -6,6 +6,7 @@ import { noStore } from './middleware/cache';
 import { apiContext } from './middleware/context';
 import { originAndCsrf } from './middleware/csrf';
 import { errorHandler } from './middleware/error';
+import { hsts, HSTS_VALUE } from './middleware/hsts';
 import { requestLogging } from './middleware/observability';
 import { requestId } from './middleware/request-id';
 import { authRoutes } from './modules/auth/routes';
@@ -16,10 +17,11 @@ export function createApp() {
   const app = new Hono<AppEnv>();
 
   app.onError(errorHandler);
+  app.use('*', hsts);
   app.use('/api/v1/*', requestId);
   app.use('/api/v1/*', requestLogging);
   app.use('/api/v1/*', noStore);
-  app.use('/api/v1/*', secureHeaders());
+  app.use('/api/v1/*', secureHeaders({ strictTransportSecurity: HSTS_VALUE }));
   app.use('/api/v1/*', apiContext);
   app.use('/api/v1/*', bodyLimit);
   app.use('/api/v1/*', originAndCsrf);

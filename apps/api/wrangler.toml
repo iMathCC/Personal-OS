@@ -5,6 +5,8 @@ name = "personal-os"
 main = "src/index.ts"
 compatibility_date = "2026-11-20"
 workers_dev = true
+# Preview URLs temporárias não são necessárias e ampliam a superfície pública.
+preview_urls = false
 
 [vars]
 APP_VERSION = "0.1.0"

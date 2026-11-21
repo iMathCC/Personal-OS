@@ -100,7 +100,10 @@ Justificativa:
 ### 2.4 CSRF
 
 - `SameSite=Lax` reduz risco, mas não é suficiente para todos os casos.
-- Toda mutação exige `Origin` presente e igual a uma allowlist explícita (`ORIGIN`/`ALLOWED_ORIGINS`); `Referer` **não** é usado como fallback.
+- Toda mutação exige `Origin` presente e igual a uma allowlist explícita (`ORIGIN`/`ALLOWED_ORIGINS`).
+  Quando `Origin` está ausente, `requestOrigin()` usa a origem do `Referer` como **fallback apenas dessa comparação**
+  (`apps/api/src/modules/auth/security.ts:62-77`); isso **não** dispensa o token CSRF, que continua obrigatório em
+  toda mutação. `Referer` nunca é aceito como substituto do token.
 - Token CSRF de 128 bits em cookie `pos_csrf` (não HttpOnly) + header `X-CSRF-Token`; comparação em tempo constante e verificação HMAC com `CSRF_SECRET`. O subject é o hash da sessão (`session:<hash>`) quando autenticado e `anon:<vid>` no pré-login, onde `pos_vid` é um cookie opaco de dispositivo.
 - `GET /auth/csrf` emite o token anônimo; após setup/login/logout o subject muda e o cliente renova o token. O frontend guarda o token **apenas em memória** (nunca `localStorage`/`sessionStorage`).
 - Requisições `GET/HEAD/OPTIONS` são isentas e não mudam estado.
@@ -118,7 +121,13 @@ Justificativa:
 | Leituras autenticadas | 600 req | 1 min por usuário |
 | Escritas autenticadas | 300 req | 1 min por usuário |
 
-Implementação em D1 (`rate_limits`), janela fixa com upsert atômico; contadores de falha usam a chave `failure:<prefix>:<id>` na mesma tabela. Respostas excedentes retornam `429` com `Retry-After`. **Falha fechada:** se o D1 não responder em qualquer etapa da verificação/gravação, a rota responde `503 DEPENDENCY_UNAVAILABLE` — inclusive leituras. Cloudflare fornece proteção DDoS de rede, mas não substitui limites de aplicação. Somente `CF-Connecting-IP` é confiável como IP do cliente; IP e UA são salvos como hash com salt (`IP_HASH_SALT`). Exportação/importação e limite global por IP ainda não implementados (Fases posteriores).
+**Estado atual (Entrega 9):** os limites acima estão implementados nas rotas `/auth/*`. As rotas `/studies/*`
+hoje contam apenas com sessão válida, validação Zod e proteção DDoS de rede da Cloudflare — **não** há limite de
+aplicação por usuário nelas. As linhas “leituras/escritas autenticadas” descrevem a política pensada para rotas
+protegidas em geral, mas ainda não são aplicadas a `/studies/*`. Adicionar esse limite é mudança de comportamento
+e depende de decisão separada; não foi feito nesta entrega.
+
+Implementação em D1 (`rate_limits`), janela fixa com upsert atómico; contadores de falha usam a chave `failure:<prefix>:<id>` na mesma tabela. Respostas excedentes retornam `429` com `Retry-After`. **Falha fechada:** se o D1 não responder em qualquer etapa da verificação/gravação, a rota responde `503 DEPENDENCY_UNAVAILABLE` — inclusive leituras. Cloudflare fornece proteção DDoS de rede, mas não substitui limites de aplicação. Somente `CF-Connecting-IP` é confiável como IP do cliente; IP e UA são salvos como hash com salt (`IP_HASH_SALT`). Exportação/importação e limite global por IP ainda não implementados (Fases posteriores).
 
 ---
 
