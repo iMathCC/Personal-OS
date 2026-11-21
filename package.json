@@ -23,8 +23,12 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test -w @personal-os/api",
+    "test": "npm run test -w @personal-os/domain && npm run test -w @personal-os/api",
     "test:watch": "npm run test:watch -w @personal-os/api",
+    "test:integration": "npm run test -w @personal-os/api -- test/db",
+    "db:generate": "npm run generate -w @personal-os/db",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config apps/api/wrangler.local.toml",
+    "db:seed:local": "wrangler d1 execute DB --local --config apps/api/wrangler.local.toml --file packages/db/src/seed.sql",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run build",
     "deploy": "npm run build && wrangler deploy --config apps/api/wrangler.toml"
   },

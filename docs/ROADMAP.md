@@ -2,7 +2,7 @@
 
 - **Versão:** 1.0 (Fase 0)
 - **Data:** 2026-11-20
-- **Status:** Proposta para aprovação
+- **Status:** Fase 0 aprovada; Fase 1 em execução (progresso em §9)
 
 O roadmap é organizado em **entregas verificáveis**, não em datas. Cada fase termina com critérios objetivos e o projeto deve permanecer executável ao final de cada etapa. Nenhuma fase começa sem aprovação da anterior.
 
@@ -33,7 +33,7 @@ O roadmap é organizado em **entregas verificáveis**, não em datas. Cada fase 
 
 ---
 
-## 3. Fase 0 — Planejamento (atual)
+## 3. Fase 0 — Planejamento (concluída)
 
 ### Entregáveis
 
@@ -56,7 +56,7 @@ Especificação coerente, arquitetura documentada, modelo revisado, roadmap veri
 
 ### Saída
 
-Aprovação humana das decisões da §8. Sem aprovação, a Fase 1 não inicia.
+Aprovação humana das decisões da §8. Registro: Fase 0 aprovada e Tarefa 1.1 aprovada (commit `7b9e93c`). Permanecem **não aprovadas** as decisões D-13 (retenção de auditoria) e D-14; não devem ser tratadas como aprovadas.
 
 ---
 
@@ -112,7 +112,7 @@ Dashboards, tarefas, métricas, módulos de vida, projeções, recomendações, 
 
 ### 4.4 Riscos/gates
 
-- **Gate de CPU:** se passkey verification + middleware exceder 10 ms com frequência, decidir entre otimizar, simplificar sessão ou rever auth (ADR-0003) antes de seguir.
+- **Gate de CPU:** se passkey verification + middleware exceder 10 ms com frequência, decidir entre otimizar, simplificar sessão ou rever auth (ADR-0003) antes de seguir. Ainda não medido em ambiente publicado (ver §9.2); medições locais são latência, não CPU.
 - **Gate de domínio:** se o usuário quiser domínio próprio, decidir **antes** do cadastro de passkeys (RP ID é estável).
 
 ---
@@ -297,22 +297,44 @@ Ordem sugerida (uma entrega por módulo, com aceite próprio):
 
 ---
 
-## 9. Próxima tarefa de implementação (após aprovação)
+## 9. Progresso da Fase 1 e próxima tarefa
 
-**Tarefa 1.1 — Bootstrap verificável do monorepo**
+### 9.1 Concluído e aprovado
 
-1. Criar `package.json` raiz com workspaces e scripts (`dev`, `build`, `lint`, `typecheck`, `test`).
-2. Fixar Node 24 em `.nvmrc` e `engines`; configurar TypeScript estrito em `tsconfig.base.json`.
-3. Criar `apps/api` com Hono + `GET /api/v1/health` e `wrangler.toml` (D1 binding local).
-4. Criar `apps/web` com Vite + React + TS + Tailwind + shadcn/ui, shell mínimo e proxy `/api`.
-5. Criar `packages/shared` com o schema Zod do health check e o envelope de erro.
-6. Configurar Vitest (unitário) e um teste do health check via `app.request()`.
-7. Configurar ESLint/Prettier e CI do GitHub Actions (lint, typecheck, test, build).
-8. Documentar comandos no README e registrar a medição de CPU do health check.
+**Tarefa 1.1 — Bootstrap verificável do monorepo** (commit `7b9e93c`): workspaces, Node 24, TypeScript estrito, Hono + `/api/v1/health`, SPA Vite/React, Vitest, ESLint/Prettier, CI e README operacional.
 
-**Critério de aceite:** `npm ci && npm run lint && npm run typecheck && npm test && npm run build` passa; `wrangler dev` responde `{"status":"ok"}`; CI verde; nenhuma funcionalidade além do health check.
+**Tarefa 1.2 — Entrega 1 (spike WebAuthn/Workers):** compatibilidade de `@simplewebauthn/server@14.1.0` verificada no runtime Workers com 15 testes; relatório em `docs/spikes/001-webauthn-workers.md`. Sem polyfill nem imports `node:*`.
 
-**Não fazer nesta tarefa:** auth, schema de domínio, migrações, dashboard, deploy de produção.
+**Tarefa 1.2 — Entrega 2 (fundação de persistência): aprovada.**
+
+1. `packages/db` com schema Drizzle de 12 tabelas, cliente D1, helper UUIDv7 e exports tipados.
+2. Migrações versionadas em `apps/api/migrations`: `0000_init.sql`, `0001_audit_append_only.sql`, `0002_audit_no_replace.sql`, com journal do Drizzle Kit. Migrações aplicadas não são editadas; correções viram nova migração.
+3. Banco do zero e upgrade validados em D1 local; seeds idempotentes (4 fontes de sistema + 8 áreas).
+4. FKs com índice, checks de enums/formatos, auditoria append-only no banco, limite de 10 sessões ativas no estado final e padrão atômico `UPDATE ... AND version=?` + `INSERT ... SELECT ... WHERE changes()=1` no mesmo `db.batch()`.
+5. Testes de integração em `apps/api/test/db` com binding descartável `DB_TEST`: 17 testes cobrindo schema, migração em sequência, FKs, unicidade, NOT NULL, índices em consultas críticas, CRUD e seeds.
+6. Documentação atualizada: `DATA_MODEL.md`, `ARCHITECTURE.md`, `SECURITY.md` (runbook §14), ADRs 0006/0007 e novo ADR-0012.
+
+### 9.2 Concluído, aguardando revisão
+
+**Tarefa 1.2 — Entrega 3 (fundação de autenticação):**
+
+1. Domínio puro em `packages/domain`: política de sessões/TTL/LRU, contadores WebAuthn, rate limit, segurança e erros tipados — 20 testes unitários.
+2. Contratos Zod em `packages/shared/src/auth.ts`, consumidos por API e frontend; nenhuma duplicação de shape.
+3. API: `GET /auth/csrf` e endpoints de setup, login, logout, logout-all, recuperação e gerenciamento de sessões em `/api/v1/auth/*`, com cookies `__Host-pos_session` (256 bits, SHA-256 no banco, 90 dias), `pos_csrf` e `pos_vid`.
+4. Middlewares: contexto com sessão validada no D1 a cada requisição, allowlist de `Origin`, CSRF assinado (session/anon), `Content-Type` JSON, body limit de 16 KB, rate limits concretos com `Retry-After` e falha fechada, request ID e headers seguros.
+5. WebAuthn com `@simplewebauthn/server@14.1.0`: UP/UV obrigatórios, challenge de uso único (10 min), contador crescente/zero aceito e igual/regressivo auditado como anomalia; falhas de verificação retornam `401`, consumo duplo retorna `409`.
+6. Recuperação: 10 códigos de 128 bits exibidos uma vez, token de 256 bits por 10 min, uso único, sem criação de sessão; runbook administrativo sem bypass em `docs/operations/admin-recovery.md`.
+7. Atomicidade: mutação + auditoria no mesmo `db.batch()`, guards `UNIQUE`/`changes()=1` para challenges, códigos e limite de 10 sessões (LRU). Testes de concorrência cobrem challenge duplo, código duplo e 14 logins simultâneos.
+8. Frontend mínimo: setup, login, recuperação, exibição única dos códigos, confirmação, logout, listagem/revogação de sessões; token CSRF em memória, limpeza de caches privados no logout e service worker sem cache de `/api/v1/auth/*`.
+9. Testes: domínio + API (80 no total), incluindo integração, segurança, concorrência e E2E em nível de Worker com autenticador virtual (`app.request` + D1 real, sem Playwright). Nenhuma migração nova; nenhuma dependência paga.
+
+**Fora do escopo desta entrega:** CRUD de negócio, dashboard, IA, export/restauração, R2, Cron Triggers, deploy e E2E browser-driven (Playwright).
+
+**Gate pendente:** CPU p95 em ambiente publicado ainda não medido; latências locais do spike e do health check não são CPU. O gate da §7 permanece aberto.
+
+### 9.3 Próximo passo
+
+Aguardar **revisão explícita da Entrega 3**. A Entrega 4 da Tarefa 1.2 só será detalhada e iniciada após essa aprovação; não antecipar escopo, dependências ou schema além do já decidido em ADR.
 
 ---
 

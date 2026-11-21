@@ -1,6 +1,6 @@
 # ADR-0006 — Contratos REST versionados
 
-- **Status:** Proposto (requer aprovação)
+- **Status:** Aceito com ajustes (Tarefa 1.2, Entrega 2)
 - **Data:** 2026-11-20
 - **Relacionados:** API_CONTRACTS, ADR-0002
 
@@ -17,6 +17,13 @@ O frontend e o backend evoluem juntos, mas exportações, scripts e uma futura m
 - Schemas Zod em `packages/shared` como fonte de verdade; DTOs `camelCase`.
 - Códigos de erro estáveis; HTTP status coerentes.
 - Mudanças incompatíveis → `/v2`; adições compatíveis não mudam versão.
+
+## Ajustes aprovados na Tarefa 1.2 (Entrega 2)
+
+- `db.batch()` do D1 é atômico, mas **não interrompe** as statements seguintes quando uma escrita condicional afeta zero linhas. O padrão obrigatório é `UPDATE ... WHERE ... AND version=?` seguido de `INSERT ... SELECT ... WHERE changes()=1`, com teste de integração cobrindo o caso de zero linhas.
+- O limite de 10 sessões ativas é verificado também no banco (trigger de segurança), sem substituir a revogação da LRU feita pelo serviço com auditoria no mesmo batch.
+
+**Ajustes implementados na Entrega 3:** `GET /auth/csrf` expõe o token anônimo pré-login; setup/login/logout respondem `200 { loggedOut: true }` (exceto setup, `201`) em vez de `204`; corpo das rotas de auth limitado a 16 KB; violação de guard de uso único retorna `409 CONFLICT`; limites excedidos retornam `429` com `Retry-After`. Schemas Zod de auth em `packages/shared/src/auth.ts` são usados por API e frontend.
 
 ## Alternativas consideradas
 

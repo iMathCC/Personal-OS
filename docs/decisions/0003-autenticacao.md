@@ -21,6 +21,8 @@ Usar **passkeys (WebAuthn)** como método primário, com:
 
 Biblioteca: `@simplewebauthn/server` (suporta Workers) + `@simplewebauthn/browser`. Validar CPU com benchmark na Fase 1.
 
+**Estado de implementação (Entrega 3):** flow completo de setup/login/recuperação com `@simplewebauthn/server@14.1.0` e `@simplewebauthn/browser@14.0.0`; UP/UV obrigatórios, contador crescente/zero aceito e regressão auditada como anomalia; sessões, CSRF, rate limits e middleware em produção no Worker. A jornada é coberta por teste E2E em nível de Worker com autenticador virtual. O gate de CPU p95 em ambiente publicado permanece aberto.
+
 ## Alternativas consideradas
 
 | Alternativa | Prós | Contras |

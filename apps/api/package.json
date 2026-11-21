@@ -11,7 +11,10 @@
     "deploy": "wrangler deploy --config wrangler.toml"
   },
   "dependencies": {
+    "@personal-os/db": "*",
+    "@personal-os/domain": "*",
     "@personal-os/shared": "*",
+    "@simplewebauthn/server": "14.1.0",
     "hono": "4.13.19",
     "zod": "4.6.7"
   },

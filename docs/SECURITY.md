@@ -79,8 +79,8 @@ Justificativa:
 
 - RP ID e Origin configurados por ambiente (`RP_ID`, `ORIGIN`), nunca derivados de header.
 - Desafio aleatório ≥ 16 bytes, armazenado com TTL de 10 min, uso único.
-- Verificar `type`, `challenge`, `origin`, `rpIdHash`, flags (`UP`, `UV` exigido para login), assinatura e contador.
-- Contador de assinatura atualizado; regressão de contador é rejeitada (quando o autenticador suporta).
+- Verificar `type`, `challenge`, `origin`, `rpIdHash`, flags (`UP` e `UV` exigidos), assinatura e contador. Exceções do `@simplewebauthn/server` (origin/RP ID/UP/UV/assinatura inválidos) são convertidas para `401 UNAUTHENTICATED`; nunca vazam como 500.
+- Contador zero ou crescente é aceito. Contador igual ou regressivo é **anomalia auditada** (`counter_anomaly`), preservando o último valor confiável em vez de rejeitar a autenticação legítima.
 - Múltiplas passkeys permitidas (ex.: celular + chave física) para evitar lockout.
 - Códigos de recuperação: 10 códigos de 128 bits, exibidos uma vez, armazenados como SHA-256, uso único; usar um invalida todas as sessões e exige nova passkey.
 - Bootstrap: `SETUP_TOKEN` secreto e de alta entropia; endpoint desabilitado após `setup_completed_at`.
@@ -90,32 +90,35 @@ Justificativa:
 ### 2.3 Sessões
 
 - Token de 256 bits gerado com `crypto.getRandomValues`; armazenado apenas como SHA-256.
-- Cookie `__Host-pos_session`: `HttpOnly; Secure; SameSite=Lax; Path=/` (sem `Domain`).
-- Expiração absoluta 90 dias; inatividade 30 dias; rotação em login/recuperação.
-- `last_seen_at` atualizado no máximo 1×/hora.
+- Cookie `__Host-pos_session`: `HttpOnly; Secure; SameSite=Lax; Path=/` (sem `Domain`), `Max-Age` de 90 dias.
+- Expiração absoluta 90 dias; inatividade 30 dias; nova sessão em login/setup (recuperação não cria sessão).
+- `last_seen_at` atualizado no máximo 1×/hora para reduzir escritas.
 - Revogação individual e global; botão “sair de todos os dispositivos”.
-- Limite de sessões ativas (ex.: 10); excedente revoga a mais antiga.
-- Sessão não é aceita se `revoked_at` ou `expires_at` no passado.
+- Limite de 10 sessões ativas; excedente revogado por LRU no mesmo `db.batch()` da criação, reforçado por guard SQL condicional.
+- Sessão validada no D1 em toda requisição protegida; não é aceita se `revoked_at` ou `expires_at` no passado ou se excedeu inatividade.
 
 ### 2.4 CSRF
 
 - `SameSite=Lax` reduz risco, mas não é suficiente para todos os casos.
-- Toda mutação exige `Origin` (ou `Referer` como fallback) igual ao host da aplicação.
-- Token CSRF de 128 bits em cookie `pos_csrf` (não HttpOnly) + header `X-CSRF-Token`; comparar em tempo constante e vincular à sessão (HMAC do token de sessão + nonce).
-- Requisições `GET/HEAD/OPTIONS` não mudam estado.
-- Rejeitar `Content-Type` inesperado em mutações (exigir `application/json` ou `multipart/form-data` explícito).
+- Toda mutação exige `Origin` presente e igual a uma allowlist explícita (`ORIGIN`/`ALLOWED_ORIGINS`); `Referer` **não** é usado como fallback.
+- Token CSRF de 128 bits em cookie `pos_csrf` (não HttpOnly) + header `X-CSRF-Token`; comparação em tempo constante e verificação HMAC com `CSRF_SECRET`. O subject é o hash da sessão (`session:<hash>`) quando autenticado e `anon:<vid>` no pré-login, onde `pos_vid` é um cookie opaco de dispositivo.
+- `GET /auth/csrf` emite o token anônimo; após setup/login/logout o subject muda e o cliente renova o token. O frontend guarda o token **apenas em memória** (nunca `localStorage`/`sessionStorage`).
+- Requisições `GET/HEAD/OPTIONS` são isentas e não mudam estado.
+- Mutações exigem `Content-Type: application/json`; qualquer outro valor é recusado com `403 FORBIDDEN`.
 
 ### 2.5 Rate limiting
 
-| Endpoint | Limite |
-| --- | --- |
-| `POST /auth/login/*`, `/auth/setup/*`, `/auth/recovery/*` | 10 req/15 min por IP (hash) + 5 falhas por credencial |
-| Mutações autenticadas | 300 req/min por sessão |
-| Exportação/importação | 5 req/hora |
-| Demais GETs | 600 req/min por sessão |
-| Global por IP | 1.000 req/min |
+| Endpoint | Limite | Janela / chave |
+| --- | --- | --- |
+| `POST /auth/login/options` | 30 req | 15 min por IP (hash) |
+| `POST /auth/login/verify` | 10 req + 5 falhas | 15 min por IP (hash) |
+| `POST /auth/setup/*` | 10 req + 5 falhas | 15 min por IP (hash) |
+| `POST /auth/recovery/verify` | 5 req | 5 min por IP (hash) |
+| `POST /auth/recovery/register/*` | 10 req | 5 min por IP (hash) |
+| Leituras autenticadas | 600 req | 1 min por usuário |
+| Escritas autenticadas | 300 req | 1 min por usuário |
 
-Implementação em D1 (`rate_limits`), com janela fixa e upsert atômico; se D1 estiver indisponível, falhar fechado em auth e aberto em leitura (degradação documentada). Cloudflare fornece proteção DDoS de rede, mas não substitui limites de aplicação.
+Implementação em D1 (`rate_limits`), janela fixa com upsert atômico; contadores de falha usam a chave `failure:<prefix>:<id>` na mesma tabela. Respostas excedentes retornam `429` com `Retry-After`. **Falha fechada:** se o D1 não responder em qualquer etapa da verificação/gravação, a rota responde `503 DEPENDENCY_UNAVAILABLE` — inclusive leituras. Cloudflare fornece proteção DDoS de rede, mas não substitui limites de aplicação. Somente `CF-Connecting-IP` é confiável como IP do cliente; IP e UA são salvos como hash com salt (`IP_HASH_SALT`). Exportação/importação e limite global por IP ainda não implementados (Fases posteriores).
 
 ---
 
@@ -173,6 +176,13 @@ upgrade-insecure-requests;
 - Concorrência otimista via `version`/`If-Match`.
 - Idempotência em criação/importação para evitar duplicatas por retry.
 
+### 5.1 Atomicidade em autenticação
+
+- Mutação de auth e sua linha de `audit_log` são sempre enviadas no mesmo `db.batch()`; nunca há gravação sem auditoria.
+- Uso único de challenge, código de recuperação e `recoveryToken` é garantido por `INSERT` de guard em `idempotency_keys` (chave primária) + `UPDATE ... WHERE consumed_at IS NULL` com verificação de `changes()`. Violação de `UNIQUE` é traduzida para `409 CONFLICT`, nunca 500.
+- O limite de 10 sessões usa guard SQL condicional no mesmo batch da criação; revogações LRU e suas auditorias atômicas acompanham a nova sessão.
+- Testes de concorrência cobrem challenge duplo, código duplo e 14 logins simultâneos, verificando no banco o consumo único, a contagem de sessões e a correspondência um-para-um com a auditoria.
+
 ---
 
 ## 6. Proteção de dados
@@ -212,7 +222,7 @@ upgrade-insecure-requests;
 
 - Estruturados, com request ID, rota, status, duração, contagem de linhas D1.
 - **Nunca** logar: cookies, Authorization, corpos de auth, notas, valores de transações, conteúdo de saúde, chaves de IA.
-- Erros internos: logar código + request ID; detalhes só em ambiente local.
+- Erros internos: logar apenas `level`, `message`, `requestId` e `errorName`; **sem stack trace**, SQL ou corpo da requisição. Resposta ao cliente é sempre `{ error: { code: 'INTERNAL_ERROR', message: 'Erro interno.', requestId } }`.
 - Retenção de logs do provedor: 3 dias (free). Não depender deles para auditoria.
 
 ---
@@ -220,7 +230,7 @@ upgrade-insecure-requests;
 ## 7. Segredos e configuração
 
 - Segredos nunca no repositório: `.dev.vars`, `.env*` no `.gitignore`.
-- Produção: `wrangler secret put` (`SETUP_TOKEN`, `SESSION_SECRET` se necessário, `AI_API_KEY` opcional, `R2_*`).
+- Produção: `wrangler secret put` (`SETUP_TOKEN`, `CSRF_SECRET`, `IP_HASH_SALT`, `AI_API_KEY` opcional, `R2_*`). `wrangler.local.toml` contém apenas valores dummy para desenvolvimento; nunca segredos reais.
 - CI: GitHub Actions Secrets; token Cloudflare com escopo mínimo (Workers Scripts:Edit, D1:Edit, R2:Edit somente se backup).
 - Rotação: setup token após bootstrap; chave de IA ao menor sinal de exposição; token Cloudflare a cada 90 dias ou em incidente.
 - Separar credenciais por ambiente; nunca reutilizar token pessoal em CI.
@@ -264,8 +274,8 @@ upgrade-insecure-requests;
 - Dependências de UI revisadas; shadcn copiado e auditável.
 - Links externos: `rel="noopener noreferrer"`.
 - Downloads de exportação: `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`.
-- Formulários: autocomplete adequado, sem persistir dados sensíveis em `localStorage` além do necessário; tokens nunca em `localStorage`.
-- Cache do service worker limpo no logout; não cachear `/api/auth/*`.
+- Formulários: autocomplete adequado; token CSRF e dados de sessão ficam apenas em memória — **proibido** `localStorage`/`sessionStorage` para credenciais.
+- Cache do service worker limpo no logout; `/api/v1/auth/*` nunca é cacheado; caches privados (`api-get-v1*`, `private-*`) são removidos ao encerrar a sessão.
 - Aviso de sessão expirada e redirecionamento seguro (sem open redirect; validar `returnTo` interno).
 
 ---
@@ -314,14 +324,28 @@ upgrade-insecure-requests;
 - [ ] Teste de sessão revogada e expirada.
 - [ ] Documento de resposta a incidentes revisado.
 
-## 14. Resposta a incidentes (runbook inicial)
+## 14. Resposta a incidentes e operações administrativas
 
-1. **Conter:** revogar todas as sessões (`/auth/logout-all` ou SQL administrativo), rotacionar `SETUP_TOKEN`, chave de IA e token Cloudflare.
-2. **Preservar:** exportar `audit_log` e logs relevantes; não destruir evidências.
-3. **Avaliar:** escopo (acesso? alteração? vazamento?), vetor, dados afetados.
-4. **Corrigir:** patch, deploy, migração se necessário.
-5. **Recuperar:** restaurar backup/Time Travel se houver corrupção; validar integridade.
-6. **Registrar:** post-mortem sem culpa em `docs/incidents/` (a criar), com linha do tempo e ações.
+O procedimento específico para apoiar a recuperação de acesso **sem bypass de autenticação** está em `docs/operations/admin-recovery.md`.
+
+### 14.1 Regras obrigatórias
+
+- **Autorização:** nenhuma ação destrutiva (`DROP`, `DELETE` em massa, purge, restauração sob dados atuais) sem aprovação explícita e exportação verificada. Testes destrutivos usam apenas o binding `DB_TEST`.
+- **Rastreabilidade:** toda operação administrativa produz linha em `audit_log` com `actor_type`, `actor_id`, `request_id`, `before_json`/`after_json` redigidos (sem tokens, credenciais, IP puro, valores financeiros ou de saúde) e `ip_hash` com salt. Se a ação precisou de SQL direto de emergência, a auditoria manual é registrada no mesmo `requestId` e revisada depois.
+- **Preferência:** use um endpoint autenticado (quando existir) em vez de SQL direto. SQL direto é exceção de contenção, não rotina.
+- **Segredos:** `SETUP_TOKEN`, chave de IA, token Cloudflare e credenciais ficam fora do repositório e fora de logs.
+- **Evidência:** exporte `audit_log` e os logs do Worker antes de qualquer correção que possa alterar estado.
+
+### 14.2 Sequência
+
+1. **Conter:** revogar sessões afetadas ou todas (`/auth/logout-all` ou SQL administrativo autorizado), rotacionar `SETUP_TOKEN`, chave de IA e token Cloudflare.
+2. **Preservar:** exportar `audit_log`, contagens de tabelas e logs relevantes; não destruir evidências.
+3. **Avaliar:** escopo (acesso? alteração? vazamento?), vetor, primeiro `request_id` suspeito e dados afetados. Consultas úteis (somente leitura):
+   - `SELECT id, entity_type, entity_id, action, created_at FROM audit_log WHERE request_id = ? ORDER BY id;`
+   - `SELECT id, user_id, created_at, expires_at, revoked_at FROM sessions WHERE user_id = ? ORDER BY last_seen_at;`
+4. **Corrigir:** patch, deploy, migração numerada se necessário. Nunca editar migração já aplicada.
+5. **Recuperar:** restaurar backup/Time Travel se houver corrupção; validar integridade (FKs, contagens e checksum da exportação) antes de liberar o acesso.
+6. **Registrar:** post-mortem sem culpa em `docs/incidents/` (a criar), com linha do tempo, `request_id`s e ações.
 7. **Comunicar:** usuário (o próprio), se aplicável; provedores se necessário.
 
 Contatos e acessos de emergência devem ficar fora do repositório (gerenciador de senhas).

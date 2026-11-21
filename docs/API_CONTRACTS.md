@@ -4,7 +4,7 @@
 - **Base:** `/api/v1`
 - **Formato:** JSON UTF-8
 - **Autenticação:** cookie de sessão `__Host-pos_session`
-- **Status:** Proposta para aprovação
+- **Status:** Proposta para aprovação; seção de autenticação (§2) implementada na Entrega 3 da Tarefa 1.2, aguardando revisão
 
 A API é a **única porta de acesso aos dados**. O frontend não acessa D1, R2 ou serviços externos diretamente. Contratos são definidos com Zod em `packages/shared` e reutilizados no cliente e no servidor.
 
@@ -104,13 +104,14 @@ Erro:
 ### 1.7 Segurança de transporte
 
 - HTTPS obrigatório; HSTS.
-- Same-origin apenas; sem CORS por padrão.
-- Mutações exigem `Origin` igual ao host e header `X-CSRF-Token` (double-submit) válido.
-- Cookies: `__Host-pos_session` (HttpOnly, Secure, SameSite=Lax, Path=/) e `pos_csrf` (não HttpOnly, Secure, SameSite=Lax).
+- Same-origin apenas; sem CORS por padrão. `Origin` é comparado com uma allowlist explícita (`ORIGIN`/`ALLOWED_ORIGINS`), nunca derivado de header confiável.
+- Mutações (`POST`/`PUT`/`PATCH`/`DELETE`) exigem `Content-Type: application/json`, `Origin` da allowlist e header `X-CSRF-Token` válido; `GET`/`HEAD`/`OPTIONS` são isentos.
+- Cookies: `__Host-pos_session` (HttpOnly, Secure, SameSite=Lax, Path=/, sem `Domain`, 90 dias), `pos_csrf` (não HttpOnly, Secure, SameSite=Lax) e `pos_vid` (opaco, Secure, SameSite=Lax; complementa o subject do CSRF pré-sessão).
+- Limites excedidos retornam `429 RATE_LIMITED` com header `Retry-After` (segundos). Se o D1 não responder, rotas de auth falham fechado com `503 DEPENDENCY_UNAVAILABLE`.
 
 ### 1.8 Limites
 
-- Corpo JSON: 256 KB (exceto importação, 5 MB em lotes).
+- Corpo JSON: 256 KB (exceto importação, 5 MB em lotes); rotas `/api/v1/auth/*`: 16 KB (`413 PAYLOAD_TOO_LARGE`).
 - Strings: 1–10.000 caracteres conforme campo.
 - `metadata_json`: 16 KB.
 - Respostas de lista: máximo 200 itens.
@@ -119,15 +120,35 @@ Erro:
 
 ## 2. Autenticação
 
-Fluxo com passkeys (WebAuthn). O servidor armazena desafios de uso único com TTL de 10 minutos.
+Fluxo com passkeys (WebAuthn). Desafios têm ≥ 16 bytes, TTL de 10 minutos e uso único; `up` e `uv` são obrigatórios. Origens e RP ID vêm de configuração, nunca de header. Falhas de verificação WebAuthn retornam `401 UNAUTHENTICATED` (nunca 500); consumo duplo de challenge/código/token retorna `409 CONFLICT`.
+
+### 2.0 Rotas
+
+| Método | Rota | Autenticação | Descrição |
+| --- | --- | --- | --- |
+| GET | `/auth/csrf` | não | Emite token CSRF anônimo (vinculado ao `pos_vid`) para o pré-login |
+| POST | `/auth/setup/options` | `X-Setup-Token` | Inicia bootstrap |
+| POST | `/auth/setup/verify` | `X-Setup-Token` | Cria conta, passkey, sessão e códigos |
+| POST | `/auth/login/options` | não | Inicia login |
+| POST | `/auth/login/verify` | não | Verifica passkey e cria sessão |
+| POST | `/auth/logout` | sessão | Revoga a sessão atual |
+| POST | `/auth/logout-all` | sessão | Revoga todas as sessões |
+| POST | `/auth/recovery/verify` | não | Consome código e emite `recoveryToken` |
+| POST | `/auth/recovery/register/options` | `recoveryToken` | Inicia cadastro de nova passkey |
+| POST | `/auth/recovery/register/verify` | `recoveryToken` | Cadastra nova passkey e encerra recuperação |
+| GET | `/auth/me` | sessão | Usuário e contagens |
+| GET | `/auth/sessions` | sessão | Lista de sessões |
+| DELETE | `/auth/sessions/:id` | sessão | Revoga sessão específica |
+
+`GET /auth/csrf` responde `{ csrfToken, posVid }` e atualiza o cookie `pos_csrf`. Após setup/login/logout o subject do token muda (`session:<hash>` ↔ `anon:<vid>`); o cliente deve chamar `GET /auth/csrf` novamente antes da próxima mutação. O token fica apenas em memória no frontend — nunca em `localStorage`/`sessionStorage`.
 
 ### 2.1 Primeiro acesso (bootstrap)
 
 `POST /auth/setup/options`
 
-- Requer header `X-Setup-Token` igual ao segredo `SETUP_TOKEN` configurado no Worker.
+- Requer header `X-Setup-Token` igual ao segredo `SETUP_TOKEN` configurado no Worker (comparação em tempo constante).
 - Só funciona se `users.setup_completed_at IS NULL`.
-- Retorna `PublicKeyCredentialCreationOptions` + `challengeId`.
+- Corpo `{}` (estrito); retorna `{ challengeId, options }` com `PublicKeyCredentialCreationOptions`.
 
 `POST /auth/setup/verify`
 
@@ -136,49 +157,66 @@ Fluxo com passkeys (WebAuthn). O servidor armazena desafios de uso único com TT
   "challengeId": "uuid",
   "credential": { "id": "...", "rawId": "...", "response": { "...": "..." }, "type": "public-key" },
   "displayName": "Matheus",
-  "timezone": "America/Sao_Paulo"
+  "timezone": "America/Sao_Paulo",
+  "passkeyName": "Passkey do notebook"
 }
 ```
 
-- Cria usuário, passkey e sessão; gera 10 códigos de recuperação (retornados **uma única vez**).
-- `201` + `Set-Cookie` de sessão.
+- `passkeyName` é opcional (padrão `Passkey principal`).
+- Cria usuário, passkey, sessão e 10 códigos de recuperação de 128 bits (retornados **uma única vez**, armazenados só como SHA-256).
+- `201` + `Set-Cookie` de `__Host-pos_session` e `pos_csrf`.
 
 ### 2.2 Login
 
-`POST /auth/login/options` → `{ challengeId, options }` com `allowCredentials` das passkeys cadastradas.
+`POST /auth/login/options` com corpo `{}` → `{ challengeId, options }` com `allowCredentials` das passkeys cadastradas.
 
-`POST /auth/login/verify` → valida assinatura, atualiza contador, cria sessão (`200` + cookie).
+`POST /auth/login/verify` com `{ challengeId, credential }` → valida assinatura, origem, RP ID, UP/UV e contador; cria sessão (`200` + cookies). Contadores igual ou regressivo são tratados como anomalia auditada, preservando o último valor confiável.
 
-`POST /auth/logout` → revoga a sessão atual (`204`).
+`POST /auth/logout` → revoga a sessão atual, `200 { loggedOut: true }` e apaga o cookie de sessão.
 
-`POST /auth/logout-all` → revoga todas as sessões do usuário (`204`).
+`POST /auth/logout-all` → revoga todas as sessões, `200 { loggedOut: true }` e apaga o cookie de sessão.
 
 ### 2.3 Recuperação
 
 `POST /auth/recovery/verify` com `{ code }`:
 
-- Consome o código (hash), invalida todas as sessões e retorna `recoveryToken` de curta duração (10 min).
+- Normaliza o código (trim/minúsculas, remove espaços e hífens), consome o hash, revoga todas as sessões e retorna `{ recoveryToken, expiresAt }` (10 min).
+- **Não cria sessão**: a resposta não estabelece cookie de sessão.
 
-`POST /auth/recovery/register/options` + `/verify` com `recoveryToken`:
+`POST /auth/recovery/register/options` com `{ recoveryToken }` → `{ challengeId, options }`; `POST /auth/recovery/register/verify` com `{ recoveryToken, challengeId, credential, passkeyName? }` → `{ registered: true }`.
 
-- Cadastra nova passkey e encerra a recuperação.
+- O token é de uso único, vinculado a `user_id` e `purpose`; o mesmo vale para o challenge.
 - Códigos restantes permanecem válidos; o usado é marcado.
 
 ### 2.4 Sessão
 
-`GET /auth/me` → usuário, preferências, contagem de passkeys e sessões ativas.
+`GET /auth/me` → `{ user, counts: { passkeys, activeSessions } }`.
 
-`GET /auth/sessions` → lista de sessões (ID, criada em, último uso, agente resumido, atual?).
+`GET /auth/sessions` → array de `{ id, createdAt, lastSeenAt, expiresAt, current, userAgent }`.
 
-`DELETE /auth/sessions/:id` → revoga sessão específica.
+`DELETE /auth/sessions/:id` → `200 { revoked: true }`.
 
-### 2.5 Rotação e expiração
+### 2.5 Rotação, expiração e limites
 
 - Token de sessão: 32 bytes aleatórios; armazenado apenas como SHA-256.
-- Expiração absoluta: 90 dias. Inatividade: 30 dias.
+- Expiração absoluta: 90 dias. Inatividade: 30 dias. Máximo de 10 sessões ativas; excedente revogado por LRU no mesmo batch.
 - `last_seen_at` atualizado no máximo 1×/hora para reduzir escritas.
-- Logout/recuperação revogam imediatamente.
-- Recuperação de código: hash SHA-256 (código tem alta entropia), uso único.
+- Sessão validada no D1 em toda requisição protegida; logout/recuperação revogam imediatamente.
+- Códigos de recuperação: 128 bits, hash SHA-256, uso único.
+
+### 2.6 Rate limits de auth
+
+| Operação | Limite | Janela |
+| --- | --- | --- |
+| `POST /auth/login/options` | 30 req | 15 min por IP |
+| `POST /auth/login/verify` | 10 req + 5 falhas | 15 min por IP |
+| `POST /auth/setup/*` | 10 req + 5 falhas | 15 min por IP |
+| `POST /auth/recovery/verify` | 5 req | 5 min por IP |
+| `POST /auth/recovery/register/*` | 10 req | 5 min por IP |
+| Leituras autenticadas | 600 req | 1 min por usuário |
+| Escritas autenticadas | 300 req | 1 min por usuário |
+
+Excedeu → `429 RATE_LIMITED` com `Retry-After`. IP/UA são armazenados como hash com salt; `pos_vid` complementa o subject do CSRF no pré-login.
 
 ---
 

@@ -39,7 +39,9 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
-            urlPattern: ({ url }) => url.pathname.startsWith('/api/v1/'),
+            // Rotas de autenticação nunca entram no cache do service worker.
+            urlPattern: ({ url }) =>
+              url.pathname.startsWith('/api/v1/') && !url.pathname.startsWith('/api/v1/auth/'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-get-v1',

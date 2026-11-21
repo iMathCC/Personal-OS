@@ -101,7 +101,7 @@ apps/api/src/
   lib/                     # helpers de infraestrutura (crypto, datas)
 ```
 
-Módulos só são criados quando entram na fase correspondente. A Fase 1 contém `auth`, `areas`, `audit`, `export` e `health`.
+Módulos só são criados quando entram na fase correspondente. A Fase 1 contém `auth`, `areas`, `audit`, `export` e `health`. O módulo `auth` está implementado na Entrega 3 (domínio, contratos compartilhados, rotas, middlewares e UI mínima); os demais módulos de negócio entram nas entregas seguintes.
 
 ## 4. Topologia de deploy
 
@@ -178,7 +178,7 @@ Contratos detalhados: [API_CONTRACTS.md](API_CONTRACTS.md).
 Exemplo: `POST /api/v1/tasks`.
 
 1. Cloudflare roteia `/api/*` para o Worker (assets não são consultados).
-2. Middlewares: `requestId` → `secureHeaders` → `bodyLimit` → `auth` (cookie → hash → sessão) → `csrf` (Origin + token) → `rateLimit`.
+2. Middlewares: `requestId` → `secureHeaders` → `apiContext` (cookie → hash → sessão validada no D1, IP/UA em hash, `pos_vid`) → `bodyLimit` (16 KB em auth) → `originAndCsrf` (allowlist, JSON, token) → `rateLimit` por rota. `authRequired` é aplicado nas rotas protegidas.
 3. Rota valida corpo/params com Zod (`packages/shared`).
 4. Serviço carrega entidades via repositório, aplica regras, verifica `version` (concorrência otimista).
 5. `db.batch([insert/update, auditLog])` grava mutação + auditoria atomicamente.
@@ -193,10 +193,12 @@ Exemplo: `POST /api/v1/tasks`.
 
 ### 7.1 D1 + Drizzle
 
-- Driver `drizzle-orm/d1`; migrações SQL geradas por `drizzle-kit` e aplicadas com `wrangler d1 migrations apply`.
-- D1 não oferece transações interativas: usar `db.batch()` para atomicidade. Serviços não mantêm transação aberta entre awaits.
+- Driver `drizzle-orm/d1`; migrações SQL geradas por `drizzle-kit` em `apps/api/migrations` e aplicadas por `wrangler d1 migrations apply`. Triggers que o Kit não gera vivem em migrações manuais numeradas (`0001`, `0002`) e são imutáveis após aplicação.
+- D1 não oferece transações interativas: usar `db.batch()` para atomicidade. Serviços não mantêm transação aberta entre awaits. O batch não para ao encontrar uma escrita condicional com zero linhas; proteger a auditoria com `WHERE changes()=1`.
+- `batchSql()` (`packages/db/src/client.ts`) envia templates `sql` puros pelo `$client.batch()` do D1 via `SQLiteAsyncDialect.sqlToQuery()`: o `db.batch()` do Drizzle aceita apenas queries preparadas e falha com SQL puro. O serviço de auth usa `atomicBatch()`, que converte violação de `UNIQUE` dos guards em `409 CONFLICT`.
 - `PRAGMA foreign_keys = ON` (D1 aplica FKs); toda FK tem índice explícito.
-- IDs UUIDv7 (ordenáveis por tempo), `TEXT`.
+- IDs UUIDv7 (ordenáveis por tempo), `TEXT`; exceção documentada: quatro IDs fixos de fontes de sistema.
+- A configuração local do Worker (modelo em `apps/api/wrangler.local.example.toml`, não versionada) expõe `DB_TEST`, binding descartável usado somente por testes de migração/destrutivos. Nenhum código de aplicação o consome.
 - Datas em UTC ISO-8601 com milissegundos + `local_date` para agrupamento.
 - Dinheiro em centavos (`INTEGER`).
 
@@ -216,7 +218,8 @@ O plano free permite 5 milhões de leituras/dia, mas cada leitura de linha conta
 ### 7.3 Histórico e auditoria
 
 - `events` é o registro de acontecimentos do usuário (domínio).
-- `audit_log` é o log técnico append-only de mutações (quem, quando, antes/depois, request ID).
+- `audit_log` é o log técnico append-only de mutações (quem, quando, antes/depois, request ID). Triggers no banco bloqueiam `UPDATE`, `DELETE` e `INSERT OR REPLACE`, mas não substituem o serviço: ator, `request_id` e payload sensível continuaram sendo responsabilidade da camada de aplicação.
+- Limite de 10 sessões ativas é conferido também por trigger; a revogação LRU é feita pelo serviço com auditoria no mesmo batch ([ADR-0012](decisions/0012-invariantes-operacionais-de-auth.md)).
 - Não haverá event sourcing completo. Justificativa: complexidade de reconstrução, versionamento de eventos e projeções não se paga para um sistema pessoal; auditoria + soft delete atendem ao requisito ([ADR-0007](decisions/0007-auditoria-e-historico.md)).
 
 ## 8. Frontend e PWA

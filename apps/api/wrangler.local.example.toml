@@ -1,0 +1,29 @@
+# Modelo para apps/api/wrangler.local.toml (arquivo local, não versionado).
+# Copie para wrangler.local.toml antes de usar os scripts db:* ou wrangler dev local.
+name = "personal-os-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-20"
+workers_dev = true
+
+[vars]
+APP_VERSION = "0.1.0"
+# Valores exclusivamente locais/de teste. Nunca usar em produção.
+SETUP_TOKEN = "local-setup-token"
+RP_ID = "personal-os.test"
+RP_NAME = "Personal OS (local)"
+ORIGIN = "https://personal-os.test"
+CSRF_SECRET = "local-csrf-secret-not-for-production"
+IP_HASH_SALT = "local-ip-salt-not-for-production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "personal-os"
+# ID local: o Miniflare usa um banco local e ignora este valor.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+# Binding exclusivo para testes destrutivos. Não usar em código de aplicação.
+[[d1_databases]]
+binding = "DB_TEST"
+database_name = "personal-os-test"
+database_id = "00000000-0000-0000-0000-000000000001"

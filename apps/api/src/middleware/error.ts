@@ -1,6 +1,8 @@
+import { DomainError } from '@personal-os/domain';
 import type { ErrorCode } from '@personal-os/shared';
 import type { ErrorHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { AppEnv } from '../env';
 
 const CODE_BY_STATUS: Record<number, ErrorCode> = {
@@ -17,23 +19,47 @@ const CODE_BY_STATUS: Record<number, ErrorCode> = {
   503: 'DEPENDENCY_UNAVAILABLE',
 };
 
+const STATUS_BY_DOMAIN_CODE: Record<DomainError['code'], ContentfulStatusCode> = {
+  UNAUTHENTICATED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  VALIDATION_ERROR: 400,
+  BUSINESS_RULE_VIOLATION: 422,
+  RATE_LIMITED: 429,
+  DEPENDENCY_UNAVAILABLE: 503,
+};
+
 export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
   const requestId = c.get('requestId') ?? 'unknown';
+  const code: ErrorCode = err instanceof DomainError ? err.code : 'INTERNAL_ERROR';
+  const status = err instanceof DomainError ? STATUS_BY_DOMAIN_CODE[err.code] : 500;
+  const details = err instanceof DomainError ? err.details : undefined;
 
   if (err instanceof HTTPException) {
-    const status = err.status;
-    const code = CODE_BY_STATUS[status] ?? 'INTERNAL_ERROR';
-
+    const httpStatus = err.status;
+    const httpCode = CODE_BY_STATUS[httpStatus] ?? 'INTERNAL_ERROR';
+    const retryAfter = err.res?.headers.get('Retry-After');
+    if (retryAfter !== null && retryAfter !== undefined) {
+      c.header('Retry-After', retryAfter);
+    }
     return c.json(
       {
         error: {
-          code,
+          code: httpCode,
           message: err.message || 'Erro na requisição.',
           requestId,
         },
       },
-      status,
+      httpStatus,
     );
+  }
+
+  if (err instanceof DomainError) {
+    if (details !== undefined) {
+      return c.json({ error: { code, message: err.message, details, requestId } }, status);
+    }
+    return c.json({ error: { code, message: err.message, requestId } }, status);
   }
 
   // Nunca expor stack trace, SQL ou dados do usuário. Apenas o tipo do erro

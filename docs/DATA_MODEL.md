@@ -2,7 +2,7 @@
 
 - **Versão:** 1.0 (Fase 0)
 - **Data:** 2026-11-20
-- **Status:** Proposta para aprovação
+- **Status:** Aprovado; fundação implementada na Entrega 2 e fluxos de autenticação implementados na Entrega 3 da Tarefa 1.2 (aguardando revisão)
 - **Banco:** Cloudflare D1 (SQLite 3)
 - **ORM:** Drizzle ORM
 
@@ -65,6 +65,8 @@ Tabelas de fatos/observações (`transactions`, `metric_observations`, `study_se
 | `src_calculation` | `calculation` | Derivado por algoritmo determinístico |
 | `src_inference` | `inference` | Inferência/estimativa (exige `confidence`) |
 | `src_integration_*` | `integration` | Criada sob demanda por integração |
+
+Os quatro IDs fixos acima são a exceção documentada à regra de UUIDv7: são chaves de sistema estáveis, semeadas por `packages/db/src/seed.sql`. Todas as demais entidades de domínio usam UUIDv7.
 
 Campos complementares:
 
@@ -482,7 +484,7 @@ Append-only; sem soft delete.
 | `id` | INTEGER | PK AUTOINCREMENT | Ordem monotônica |
 | `entity_type` | TEXT | NOT NULL | `task`, `transaction`, `session`... |
 | `entity_id` | TEXT | NOT NULL | |
-| `action` | TEXT | NOT NULL, CHECK (`create`,`update`,`delete`,`restore`,`login`,`logout`,`export`,`import`,`purge`) | |
+| `action` | TEXT | NOT NULL, CHECK (`create`,`update`,`delete`,`restore`,`login`,`logout`,`export`,`import`,`purge`,`setup`,`recovery`,`passkey_add`,`session_revoke`) | Ações de auth adicionadas na Tarefa 1.2 |
 | `actor_type` | TEXT | NOT NULL, CHECK (`user`,`system`,`job`,`integration`) | |
 | `actor_id` | TEXT | NULL | ID do usuário/sessão/job |
 | `before_json` | TEXT | NULL | Estado relevante antes |
@@ -493,7 +495,9 @@ Append-only; sem soft delete.
 
 Índices: `idx_audit_entity(entity_type, entity_id, created_at)`, `idx_audit_created(created_at)`.
 
-**Padrão de escrita atômica:** mutação + auditoria no mesmo `db.batch()`. Para updates, `UPDATE ... WHERE id=? AND version=?` seguido de `INSERT ... SELECT ... WHERE changes()=1`, garantindo que a auditoria só exista se a mutação ocorreu. Validar esse padrão em teste de integração na Fase 1.
+**Padrão de escrita atômica:** mutação + auditoria no mesmo `db.batch()`. Para updates, `UPDATE ... WHERE id=? AND version=?` seguido de `INSERT ... SELECT ... WHERE changes()=1`, garantindo que a auditoria só exista se a mutação ocorreu. Esse padrão foi validado em teste de integração: o batch **continua** após uma escrita que afeta zero linhas, portanto a condição `changes()=1` é obrigatória.
+
+**Append-only no banco:** as migrações `0001_audit_append_only.sql` e `0002_audit_no_replace.sql` criam triggers que bloqueiam `UPDATE`, `DELETE` e `INSERT OR REPLACE`. Triggers não capturam ator nem request ID: a aplicação continua obrigada a gravar esses campos no mesmo batch da mutação.
 
 **Conteúdo sensível:** `before_json`/`after_json` podem conter valores financeiros/saúde. Não logar em console; acesso ao audit é autenticado; retenção padrão 12 meses.
 
@@ -800,21 +804,39 @@ UNIQUE (`habit_id`, `local_date`). Índice: `idx_habit_logs_date(local_date)`.
 
 **`recovery_codes`**
 
-`id` PK, `user_id` FK, `code_hash` UNIQUE (SHA-256), `used_at` NULL, `created_at`. Armazenar apenas hash; exibir uma vez.
+`id` PK (UUIDv7), `user_id` FK, `code_hash` UNIQUE (SHA-256, 64 caracteres), `used_at` NULL, `created_at`. Armazenar apenas hash; exibir uma vez, com confirmação do usuário e sem gravar em storage do navegador ([ADR-0012](decisions/0012-invariantes-operacionais-de-auth.md)).
+
+**`recovery_tokens`**
+
+Token temporário para registro de nova passkey durante recuperação.
+
+| Coluna | Tipo | Restrições |
+| --- | --- | --- |
+| `id` | TEXT | PK, UUIDv7 |
+| `user_id` | TEXT | NOT NULL, FK users (`ON DELETE CASCADE`) |
+| `token_hash` | TEXT | NOT NULL, UNIQUE, SHA-256 de 64 caracteres |
+| `purpose` | TEXT | NOT NULL DEFAULT `recovery_register_passkey`, CHECK nesse valor |
+| `expires_at` | TEXT | NOT NULL, maior que `created_at` |
+| `consumed_at` | TEXT | NULL |
+| `created_at` | TEXT | NOT NULL |
+
+Índices: `idx_recovery_tokens_hash`, `idx_recovery_tokens_user`, `idx_recovery_tokens_expiry`. Nunca armazenar o token em texto puro.
 
 **`auth_challenges`**
 
-`id` PK, `type` CHECK(`registration`,`authentication`), `challenge` TEXT, `user_handle` TEXT NULL, `expires_at` NOT NULL, `consumed_at` NULL, `created_at`. Índice `expires_at`. TTL 5–10 min.
+`id` PK (UUIDv7), `type` CHECK(`registration`,`authentication`), `purpose` NULL ou CHECK(`setup`,`login`,`recovery_register_passkey`), `challenge` TEXT, `user_id` NULL FK users (`ON DELETE CASCADE`), `user_handle` TEXT NULL, `expires_at` NOT NULL e maior que `created_at`, `consumed_at` NULL, `created_at`. Índices `idx_auth_challenges_expiry` e `idx_auth_challenges_user`. TTL 5–10 min, uso único por propósito.
+
+**Limite de sessões:** `idx_sessions_lru(user_id, last_seen_at) WHERE revoked_at IS NULL` suporta a revogação da sessão menos recentemente usada. O trigger `sessions_active_limit` aborta uma 11ª sessão ativa como rede de segurança; a revogação auditada é feita pelo serviço no mesmo `db.batch()`.
 
 ### 5.2 Operação
 
 **`idempotency_keys`**
 
-`key` TEXT PK, `method` TEXT, `path` TEXT, `request_hash` TEXT, `status_code` INTEGER, `response_json` TEXT, `created_at`, `expires_at`. TTL 24 h. Limite de tamanho da resposta (ex.: 64 KB); respostas maiores não são armazenadas.
+`key` TEXT PK, `method` TEXT, `path` TEXT, `request_hash` TEXT, `status_code` INTEGER, `response_json` TEXT, `created_at`, `expires_at`. TTL 24 h. Limite de tamanho da resposta (ex.: 64 KB); respostas maiores não são armazenadas. Além de idempotência de API, a PK é usada como guard de uso único (`<purpose>:<id>`) e de limite de sessões (`guard:session-limit:<user_id>`) dentro do mesmo `db.batch()`; a violação de `UNIQUE` aborta a operação e é convertida em `409`.
 
 **`rate_limits`**
 
-`key` TEXT PK (ex.: `login:ip:<hash>`), `window_start` TEXT, `count` INTEGER, `expires_at` TEXT. Upsert atômico; TTL 24 h.
+`key` TEXT PK (ex.: `login:verify:<ip_hash>`), `window_start` TEXT, `count` INTEGER, `expires_at` TEXT. Upsert atômico; TTL 24 h. Contadores de falhas de autenticação usam a chave derivada `failure:<key>` na mesma tabela (ex.: `failure:login:verify:<ip_hash>`), sem coluna adicional.
 
 **`job_runs`**
 
@@ -859,13 +881,13 @@ UNIQUE (`habit_id`, `local_date`). Índice: `idx_habit_logs_date(local_date)`.
 2. **Nunca** editar migração já aplicada; criar nova migração corretiva.
 3. Toda migração é testada em D1 local a partir de banco vazio **e** a partir do schema anterior (upgrade).
 4. Mudanças destrutivas (`DROP`, `ALTER` que perde dados) exigem backup verificado e aprovação humana; preferir expand/contract.
-5. Seeds idempotentes:
+5. Seeds idempotentes em `packages/db/src/seed.sql` (`ON CONFLICT ... DO NOTHING`):
    - fontes de sistema (`src_manual`, `src_import`, `src_calculation`, `src_inference`);
-   - 8 áreas;
-   - categorias financeiras básicas;
-   - nenhuma métrica/objetivo fictício.
-6. D1 local: `wrangler d1 migrations apply personal_os --local`.
-7. Produção: workflow separado com aprovação, backup/export antes de migrações destrutivas.
+   - 8 áreas com IDs UUIDv7 fixos;
+   - nenhuma métrica, objetivo, categoria financeira ou dado fictício.
+6. Migrações desta entrega: `0000_init.sql` (12 tabelas), `0001_audit_append_only.sql` (triggers de auditoria e limite de sessões) e `0002_audit_no_replace.sql` (bloqueio de `INSERT OR REPLACE`).
+7. D1 local: `npm run db:migrate:local` e `npm run db:seed:local` (binding `DB` de `apps/api/wrangler.local.toml`). Testes usam o binding descartável `DB_TEST`, sem `migrations_dir`.
+8. Produção: workflow separado com aprovação, backup/export antes de migrações destrutivas.
 
 ---
 

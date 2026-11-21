@@ -1,18 +1,26 @@
 import { Hono } from 'hono';
 import { secureHeaders } from 'hono/secure-headers';
 import type { AppEnv } from './env';
+import { bodyLimit } from './middleware/body-limit';
+import { apiContext } from './middleware/context';
+import { originAndCsrf } from './middleware/csrf';
 import { errorHandler } from './middleware/error';
 import { requestId } from './middleware/request-id';
+import { authRoutes } from './modules/auth/routes';
 import { healthRoutes } from './modules/health/routes';
 
 export function createApp() {
   const app = new Hono<AppEnv>();
 
-  app.use('*', requestId);
-  app.use('*', secureHeaders());
   app.onError(errorHandler);
+  app.use('/api/v1/*', requestId);
+  app.use('/api/v1/*', secureHeaders());
+  app.use('/api/v1/*', apiContext);
+  app.use('/api/v1/*', bodyLimit);
+  app.use('/api/v1/*', originAndCsrf);
 
   app.route('/api/v1', healthRoutes);
+  app.route('/api/v1/auth', authRoutes);
 
   app.notFound((c) => {
     return c.json(

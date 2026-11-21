@@ -1,6 +1,6 @@
 # ADR-0007 — Auditoria append-only sem event sourcing
 
-- **Status:** Proposto (requer aprovação)
+- **Status:** Aceito com ajustes (Tarefa 1.2, Entrega 2)
 - **Data:** 2026-11-20
 - **Relacionados:** DATA_MODEL, PRODUCT_SPEC
 
@@ -19,6 +19,14 @@ Separar três conceitos:
 Mutação + auditoria são gravadas no mesmo `db.batch()`.
 
 Não haverá event sourcing, replay de agregados ou barramento de eventos na v1.
+
+## Ajustes aprovados na Tarefa 1.2 (Entrega 2)
+
+- `audit_log` passa a ser **append-only também no banco**: migrações `0001_audit_append_only.sql` e `0002_audit_no_replace.sql` bloqueiam `UPDATE`, `DELETE` e `INSERT OR REPLACE`. O serviço continua responsável por `actor`, `request_id` e `before/after` — triggers não substituem essa responsabilidade.
+- Metadados de auditoria seguem allowlist: sem tokens, credenciais, IP puro ou valores sensíveis; `ip_hash` exige SHA-256 com salt (64 caracteres).
+- O padrão `UPDATE ... WHERE version=?` + `INSERT ... SELECT ... WHERE changes()=1` no mesmo `db.batch()` foi validado em teste de integração, incluindo a demonstração de que o batch continua após uma escrita com zero linhas.
+
+**Estado de implementação (Entrega 3):** todas as mutações de auth (setup, login, logout, revogações, recuperação, consumo de challenge/código/token e anomalia de contador) gravam auditoria no mesmo batch. Testes de concorrência confirmam auditoria única por sessão criada e nenhuma auditoria órfã; logs estruturados de erro não incluem stack trace, SQL ou dados do usuário. Runbook de operações administrativas em `docs/operations/admin-recovery.md`.
 
 ## Alternativas consideradas
 
