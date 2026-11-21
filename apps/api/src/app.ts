@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/error';
 import { requestId } from './middleware/request-id';
 import { authRoutes } from './modules/auth/routes';
 import { healthRoutes } from './modules/health/routes';
+import { studiesRoutes } from './modules/studies/routes';
 
 export function createApp() {
   const app = new Hono<AppEnv>();
@@ -21,6 +22,7 @@ export function createApp() {
 
   app.route('/api/v1', healthRoutes);
   app.route('/api/v1/auth', authRoutes);
+  app.route('/api/v1/studies', studiesRoutes);
 
   app.notFound((c) => {
     return c.json(
