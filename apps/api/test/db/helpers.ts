@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import initMigration from '../../migrations/0000_init.sql?raw';
 import integrityMigration from '../../migrations/0001_audit_append_only.sql?raw';
 import replaceGuardMigration from '../../migrations/0002_audit_no_replace.sql?raw';
+import coreMigration from '../../migrations/0003_core_studies.sql?raw';
 
 export type Binding = string | number | null | Uint8Array | ArrayBuffer;
 
@@ -14,7 +15,18 @@ export function testDb(): D1Database {
   return env.DB_TEST;
 }
 
+// Ordem inversa das dependências: filhos antes dos pais, para que o DROP não
+// viole FKs remanescentes. Inclui as tabelas da migração 0003.
 const DROP_ORDER = [
+  'events',
+  'metric_observations',
+  'goal_metrics',
+  'goals',
+  'study_sessions',
+  'courses',
+  'metrics',
+  'operation_results',
+  'idempotency_key_reservations',
   'audit_log',
   'auth_challenges',
   'idempotency_keys',
@@ -89,6 +101,16 @@ export async function applyFullSchema(): Promise<void> {
   await applyInitialSchema();
   await applyIntegrityMigration();
   await applyReplaceGuardMigration();
+}
+
+/** Migração da Entrega 5, aplicada explicitamente pelos testes do novo modelo. */
+export async function applyCoreMigration(): Promise<void> {
+  await applyMigration(coreMigration);
+}
+
+export async function applyCoreSchema(): Promise<void> {
+  await applyFullSchema();
+  await applyCoreMigration();
 }
 
 export async function all<T>(sql: string, ...values: Binding[]): Promise<T[]> {

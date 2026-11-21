@@ -46,6 +46,11 @@ export const idempotencyKeys = sqliteTable(
     requestHash: text('request_hash').notNull(),
     statusCode: integer('status_code').notNull(),
     responseJson: text('response_json'),
+    subject: text('subject'),
+    opId: text('op_id'),
+    state: text('state').notNull().default('done'),
+    attempt: integer('attempt').notNull().default(1),
+    errorJson: text('error_json'),
     createdAt: timestamp('created_at'),
     expiresAt: text('expires_at').notNull(),
   },
@@ -59,6 +64,47 @@ export const idempotencyKeys = sqliteTable(
     ),
     check('idempotency_keys_response_size', sql`length(${table.responseJson}) <= 65536`),
     index('idx_idempotency_expiry').on(table.expiresAt),
+    index('idx_idempotency_subject').on(table.subject, table.createdAt),
+    index('idx_idempotency_op').on(table.opId),
+  ],
+);
+
+/**
+ * Reserva permanente da identidade de uma chave idempotente. É gravada antes
+ * de qualquer mutação de domínio e não pode ser alterada ou removida.
+ */
+export const idempotencyKeyReservations = sqliteTable(
+  'idempotency_key_reservations',
+  {
+    key: text('key').primaryKey(),
+    operationId: text('operation_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    createdAt: timestamp('created_at'),
+  },
+  (table) => [
+    check('idempotency_key_reservations_op_format', sql`length(${table.operationId}) = 36`),
+    check('idempotency_key_reservations_hash_format', sql`length(${table.requestHash}) = 64`),
+  ],
+);
+
+/** Resultado imutável de uma operação concluída; usado pela recuperação. */
+export const operationResults = sqliteTable(
+  'operation_results',
+  {
+    key: text('key').primaryKey(),
+    operationId: text('operation_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    statusCode: integer('status_code').notNull(),
+    bodyJson: text('body_json').notNull(),
+    createdAt: timestamp('created_at'),
+  },
+  (table) => [
+    check('operation_results_op_format', sql`length(${table.operationId}) = 36`),
+    check('operation_results_hash_format', sql`length(${table.requestHash}) = 64`),
+    check('operation_results_status', sql`${table.statusCode} BETWEEN 100 AND 599`),
+    check('operation_results_body_json_valid', sql`json_valid(${table.bodyJson})`),
+    check('operation_results_body_size', sql`length(CAST(${table.bodyJson} AS BLOB)) <= 32768`),
+    index('idx_operation_results_op').on(table.operationId),
   ],
 );
 

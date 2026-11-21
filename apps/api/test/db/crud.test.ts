@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import seedSql from '../../../../packages/db/src/seed.sql?raw';
 import {
   all,
+  applyCoreSchema,
   applyFullSchema,
   type Binding,
   executeSql,
@@ -236,7 +237,8 @@ describe('operações e regras do modelo', () => {
   });
 
   it('aplica seeds mínimos e idempotentes', async () => {
-    await applyFullSchema();
+    // O seed inclui a métrica canônica study_minutes; exige o modelo da Entrega 5.
+    await applyCoreSchema();
 
     await executeSql(seedSql);
     await executeSql(seedSql);
@@ -265,5 +267,10 @@ describe('operações e regras do modelo', () => {
     for (const area of areas) {
       expect(area.id).toMatch(UUIDV7);
     }
+
+    const metrics = await all<{ key: string; source_id: string }>(
+      'SELECT key, source_id FROM metrics',
+    );
+    expect(metrics).toEqual([{ key: 'study_minutes', source_id: 'src_calculation' }]);
   });
 });
