@@ -2,7 +2,7 @@
 
 Sistema pessoal de gestão e inteligência orientado por dados: objetivos, projetos, atividades, métricas, finanças, estudos, carreira, leituras, treino e bem-estar em um único lugar.
 
-> **Status: Fase 1 — Tarefa 1.2 (Entrega 2: fundação de persistência).** O monorepo sobe, o health check consulta o D1 local, o build da SPA funciona e o banco local tem 12 tabelas, migrações versionadas, seeds idempotentes e testes de integração. A Entrega 1 (spike WebAuthn) foi aprovada. **Ainda não há endpoints de auth, sessões funcionais, dashboard nem módulos de negócio.** Esta entrega aguarda revisão antes da Entrega 3; não use com dados reais.
+> **Status: Fase 1 — Tarefa 1.2.** Entregas 1 a 3 publicadas e em revisão; **Entrega 4 (App Shell e dashboard) implementada localmente, sem push**. Spike WebAuthn aprovado, persistência D1 com migrações e seeds, autenticação por passkey com sessões e, agora, App Shell com dashboard inicial. **Ainda não há módulos de negócio**: áreas sem implementação aparecem como planejadas, e o dashboard só usa dados reais de `/auth/me`, `/auth/sessions` e `/health`. Não use com dados reais.
 
 ## Requisitos
 
@@ -36,13 +36,19 @@ npm ci
 apps/
   api/        Worker Hono + D1 binding + testes Vitest
   web/        SPA React + Vite + Tailwind v4 + shadcn/ui + PWA
+    src/app/        App, AuthScreen, AppShell e rotas
+    src/features/   auth, dashboard, planned, settings
+    src/components/ UI compartilhada (botão, ícones, estados)
+    src/lib/        cliente API tipado e modelo de navegação
+    test/           testes de navegação, estados, status e formatação
 packages/
   db/         Schema Drizzle, cliente D1, helper UUIDv7, seeds e config do Drizzle Kit
-  shared/     Contratos Zod compartilhados (health e envelope de erro)
-docs/         Especificação, arquitetura, roadmap, ADRs e spike de WebAuthn
+  domain/     Regras puras de sessão, contadores, rate limit e segurança
+  shared/     Contratos Zod compartilhados (health, auth, erros)
+docs/         Especificação, arquitetura, roadmap, ADRs, spike e operações
 ```
 
-As migrações ficam em `apps/api/migrations` (o Wrangler as aplica pelo binding `DB`). `packages/domain` entra em uma tarefa futura da Fase 1, junto das regras de negócio; autenticação e endpoints ainda não foram implementados.
+As migrações ficam em `apps/api/migrations` (o Wrangler as aplica pelo binding `DB`). A SPA consome apenas a API; o frontend não acessa D1 nem repositórios.
 
 ## Comandos
 
@@ -56,7 +62,7 @@ As migrações ficam em `apps/api/migrations` (o Wrangler as aplica pelo binding
 | `npm run lint` | ESLint em todo o repositório |
 | `npm run format` / `format:check` | Prettier (escrita / verificação) |
 | `npm run typecheck` | TypeScript estrito em todos os workspaces |
-| `npm test` | Todos os testes da API no runtime do Workers (Miniflare), incluindo integração de DB |
+| `npm test` | Testes de domínio, frontend (navegação/estados) e API no runtime do Workers (Miniflare), incluindo integração de DB |
 | `npm run test:integration` | Somente os testes de migração/integridade do banco (`apps/api/test/db`) |
 | `npm run db:generate` | Gera uma nova migração SQL a partir do schema Drizzle |
 | `npm run db:migrate:local` | Aplica migrações pendentes no D1 local (`DB`) |
@@ -118,7 +124,19 @@ npm run build
 npm audit --audit-level=high
 ```
 
-O CI em `.github/workflows/ci.yml` roda a sequência principal com Node 24 e `npm ci`, além de `npm audit --audit-level=high`. A suíte completa da API (`npm test`) já inclui os 17 testes de integração de banco; `npm run test:integration` é o atalho para executá-los isoladamente.
+O CI em `.github/workflows/ci.yml` roda a sequência principal com Node 24 e `npm ci`, além de `npm audit --audit-level=high`. A suíte completa da API (`npm test`) já inclui os 17 testes de integração de banco; `npm run test:integration` é o atalho para executá-los isoladamente. Os 14 testes do frontend cobrem navegação, estados de interface, derivação de status e formatação de datas; não há testes visuais automatizados (Playwright não está instalado).
+
+### App Shell e dashboard (Entrega 4)
+
+A navegação tem dez áreas em três grupos (`Núcleo`, `Áreas da vida`, `Sistema`). Somente **Visão geral** e **Configurações** estão disponíveis; as demais rotas renderizam páginas que explicam o estado "Em preparação" ou "Não configurada", sem formulários ou indicadores simulados.
+
+O dashboard usa apenas dados já existentes na API:
+
+- `GET /auth/me` — nome, fuso horário, preferências e contagens;
+- `GET /health` — estado real da API/banco, exibido em "Atenção e prioridades";
+- `GET /auth/sessions` — apenas na tela de Configurações.
+
+Cards de áreas, Objetivos, Atividade recente e Atenção mostram estados vazios explicativos quando não há fonte de dados. Nenhum endpoint novo, schema, migration ou dado fictício foi introduzido. O roteador é `react-router` (já previsto no ADR-0001); o cliente de API continua único em `apps/web/src/lib/api.ts`.
 
 ### Medição local (Tarefa 1.1)
 
@@ -144,16 +162,16 @@ A Entrega 1 da Tarefa 1.2 validou `@simplewebauthn/server@14.1.0` no Workers com
 2. Rodar `npm run build` para gerar `apps/web/dist`.
 3. Configurar credenciais Cloudflare no ambiente/CI.
 
-O deploy de produção **não faz parte desta entrega** e depende das tarefas seguintes (endpoints de auth e validação em ambiente publicado).
+O deploy de produção **não faz parte desta entrega** e depende da validação em ambiente publicado (inclusive as métricas de CPU que ainda não foram medidas).
 
 ## Limitações conhecidas desta etapa
 
-- Persistência pronta, mas sem endpoints de autenticação, autorização, CSRF ou rate limit.
-- Sem sessões funcionais, fluxo WebAuthn completo, bootstrap com `SETUP_TOKEN` ou recuperação de conta.
+- Autenticação, passkeys, sessões e CSRF já funcionam, mas ainda não foram testadas em navegadores reais com autenticadores de plataforma diferentes (Chrome/Safari/iOS/Firefox).
 - `pos_vid` ainda não é usado; quando existir será dado complementar, com IP confiável e hashes com salt ([ADR-0012](docs/decisions/0012-invariantes-operacionais-de-auth.md)).
 - Runbook operacional descrito em `docs/SECURITY.md` §14, mas sem endpoints administrativos auditados.
 - Sem exportação/restauração, backup ou monitoramento de limites D1/Workers.
-- Sem módulos de negócio, dashboard ou gráficos; `packages/domain` ainda não existe.
+- Sem módulos de negócio: não há CRUD de objetivos, atividades, finanças, estudos, saúde etc. O dashboard não exibe gráficos nem indicadores de domínio porque não há endpoints que os forneçam.
+- Não há testes visuais automatizados nem verificação em navegador neste ambiente (Playwright não está instalado): o layout desktop/mobile foi implementado com breakpoints Tailwind e revisado no código, mas precisa de conferência visual humana antes da aprovação.
 - PWA instalável e cache somente leitura de GETs; escrita offline não existe.
 - `npm run deploy` é apenas um atalho preparado; não foi validado contra a Cloudflare.
 - `npm audit` não tem high/critical, mas reporta vulnerabilidades `moderate` em dependências de desenvolvimento (esbuild via drizzle-kit; glob/minimatch via vite-plugin-pwa).

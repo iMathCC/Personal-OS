@@ -224,8 +224,8 @@ O plano free permite 5 milhões de leituras/dia, mas cada leitura de linha conta
 
 ## 8. Frontend e PWA
 
-- **React 19 + Vite + TypeScript estrito**; roteamento por `react-router` (modo biblioteca), estado de servidor por `@tanstack/react-query` (proposto), formulários com `react-hook-form` + `zod` (proposto).
-- **Tailwind CSS v4** + **shadcn/ui** (componentes copiados para o repo, sem dependência de runtime do shadcn).
+- **React 19 + Vite + TypeScript estrito**; roteamento por `react-router` (**adotado na Entrega 4**, modo biblioteca, justificativa em [ADR-0001](decisions/0001-stack-e-monorepo.md)). Estado de servidor por `@tanstack/react-query` e formulários com `react-hook-form` + `zod` continuam **propostos** (D-14), não adotados.
+- **Tailwind CSS v4** + **shadcn/ui** (componentes copiados para o repo, sem dependência de runtime do shadcn). Tokens escuros em `src/index.css` são a fonte do tema desde a Entrega 4.
 - **ECharts** via `echarts/core` com imports seletivos; wrapper próprio (`<Chart>`) com `ResizeObserver`; carregamento lazy por rota. Não usar `echarts-for-react` (dependência desnecessária).
 - **PWA** com `vite-plugin-pwa` (Workbox):
   - `registerType: 'prompt'` para evitar atualização silenciosa no meio de um formulário.
@@ -234,6 +234,14 @@ O plano free permite 5 milhões de leituras/dia, mas cada leitura de linha conta
   - Fallback offline com dados da última sessão.
 - **Acessibilidade:** componentes Radix (base do shadcn), foco visível, navegação por teclado, contraste AA.
 - **Orçamento de bundle:** inicial ≤ 250 KB gzip; chunk de gráficos ≤ 300 KB gzip; medir no CI com `vite build` + relatório de tamanho.
+
+### 8.0 Estrutura da SPA (Entrega 4)
+
+- `src/app/`: `App` decide entre boot, erro de inicialização, autenticação e shell; `AuthScreen` contém apenas setup/login/recuperação; `AppShell` é o layout autenticado; `routes.tsx` mapeia as rotas.
+- `src/features/`: `auth` (bootstrap de sessão e sessões ativas), `dashboard`, `planned` (módulos sem implementação) e `settings`. Regras de negócio continuam em `packages/domain`; a UI apenas consome DTOs e deriva estados de apresentação.
+- `src/lib/api.ts` continua sendo o único cliente HTTP. O dashboard lê somente `GET /auth/me` e `GET /health`; `GET /auth/sessions` alimenta Configurações. Não existe endpoint de áreas/objetivos/atividades/alertas, então a UI exibe estados vazios e status honestos em vez de dados simulados.
+- `src/components/` concentra botão shadcn, ícones SVG próprios e componentes de `loading`/`erro`/`vazio`; `src/lib/navigation.ts` é a fonte única do mapa de dez áreas e de sua disponibilidade.
+- Testes de UI usam Vitest com ambiente Node e `react-dom/server` (sem `jsdom`/testing-library); funções puras cobrem disponibilidade de módulos, status das áreas, formatação no fuso do usuário e estados de interface.
 
 ### 8.1 Estratégia offline (v1)
 
@@ -327,7 +335,7 @@ Além da stack aprovada, estas dependências são necessárias ou reduzem risco.
 | --- | --- | --- | --- |
 | `uuid` (v7) | IDs ordenáveis por tempo, padrão RFC 9562 | ULID caseiro ou UUIDv4 | Índices melhores; 1 dep pequena |
 | `@simplewebauthn/server` + `/browser` | Passkeys corretas e auditadas | Implementar WebAuthn manualmente | Evita erros crípticos de segurança; suporta Workers |
-| `react-router` | Rotas da SPA | Roteador caseiro | Necessário para deep links/PWA |
+| `react-router` | Rotas da SPA | Roteador caseiro | **Adotada na Entrega 4**; necessário para deep links/PWA |
 | `@tanstack/react-query` | Cache, invalidação e estados de rede | Hooks/fetch manuais | Reduz bugs de sincronização; proposto |
 | `react-hook-form` + `@hookform/resolvers` | Formulários complexos com Zod | Estado manual | Menos re-renders e validação duplicada; proposto |
 | `vitest` + `@cloudflare/vitest-pool-workers` | Testes unitários e de integração no runtime real | Jest/Miniflare manual | Fidelidade ao runtime |

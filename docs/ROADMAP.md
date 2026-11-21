@@ -328,13 +328,23 @@ Ordem sugerida (uma entrega por módulo, com aceite próprio):
 8. Frontend mínimo: setup, login, recuperação, exibição única dos códigos, confirmação, logout, listagem/revogação de sessões; token CSRF em memória, limpeza de caches privados no logout e service worker sem cache de `/api/v1/auth/*`.
 9. Testes: domínio + API (80 no total), incluindo integração, segurança, concorrência e E2E em nível de Worker com autenticador virtual (`app.request` + D1 real, sem Playwright). Nenhuma migração nova; nenhuma dependência paga.
 
-**Fora do escopo desta entrega:** CRUD de negócio, dashboard, IA, export/restauração, R2, Cron Triggers, deploy e E2E browser-driven (Playwright).
+**Tarefa 1.2 — Entrega 4 (App Shell e dashboard inicial), em revisão local:**
+
+1. App Shell com sidebar desktop, drawer mobile, header contextual, skip link, foco visível e estados ativo/hover/foco; dez itens de navegação em três grupos (`Núcleo`, `Áreas da vida`, `Sistema`).
+2. O bootstrap de sessão foi extraído para `useSession` (`loading | anonymous | authenticated | error`), preservando WebAuthn, cookie HttpOnly, CSRF em memória e a limpeza de caches no logout. `401` é tratado como sessão expirada; falha de rede mostra erro com retry.
+3. Roteamento com `react-router` (dependência já prevista no [ADR-0001](decisions/0001-stack-e-monorepo.md)): deep links, botão voltar, `NavLink` ativo e rota `*` para 404. Somente Visão geral e Configurações são módulos disponíveis; os demais renderizam páginas "Em preparação"/"Não configurada".
+4. Dashboard com dados reais de `GET /auth/me` e `GET /health`: saudação, data no fuso do usuário, ciclo do produto, cards de áreas com status derivado, e seções de Objetivos, Atividade recente e Atenção/prioridades com estados vazios explicativos. Nenhum alerta, pontuação, recomendação ou gráfico simulado.
+5. Gestão de sessões movida para `/configuracoes`, preservando listagem, revogação e logout (nesta/all) da Entrega 3.
+6. Design system escuro com tokens Tailwind v4, ícones SVG próprios e componentes de loading/erro/vazio; cores do manifest PWA alinhadas ao tema.
+7. 14 testes no frontend (navegação, status, formatação no fuso do usuário e estados de interface) via Vitest + renderização SSR; nenhuma dependência nova de teste. Nenhum endpoint, schema, migration ou secret novo.
+
+**Fora do escopo das entregas 3 e 4:** CRUD de negócio, motor de recomendações, export/restauração, R2, Cron Triggers, deploy e E2E browser-driven (Playwright).
 
 **Gate pendente:** CPU p95 em ambiente publicado ainda não medido; latências locais do spike e do health check não são CPU. O gate da §7 permanece aberto.
 
 ### 9.3 Próximo passo
 
-Aguardar **revisão explícita da Entrega 3**. A Entrega 4 da Tarefa 1.2 só será detalhada e iniciada após essa aprovação; não antecipar escopo, dependências ou schema além do já decidido em ADR.
+Aguardar **revisão explícita das Entregas 3 e 4**. A próxima tarefa da Tarefa 1.2 só será detalhada e iniciada após essa aprovação; não antecipar escopo, dependências ou schema além do já decidido em ADR.
 
 ---
 
