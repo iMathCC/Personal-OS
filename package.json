@@ -23,7 +23,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test -w @personal-os/domain && npm run test -w @personal-os/api",
+    "test": "npm run test -w @personal-os/domain && npm run test -w @personal-os/web && npm run test -w @personal-os/api",
     "test:watch": "npm run test:watch -w @personal-os/api",
     "test:integration": "npm run test -w @personal-os/api -- test/db",
     "db:generate": "npm run generate -w @personal-os/db",

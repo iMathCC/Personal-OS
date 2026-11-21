@@ -7,7 +7,8 @@
     "dev": "vite --port 5173",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --port 4173",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@personal-os/shared": "*",
@@ -17,6 +18,7 @@
     "clsx": "2.1.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "react-router": "8.5.2",
     "tailwind-merge": "3.7.1"
   },
   "devDependencies": {
@@ -26,6 +28,7 @@
     "@vitejs/plugin-react": "6.3.0",
     "tailwindcss": "4.3.5",
     "vite": "8.3.8",
-    "vite-plugin-pwa": "2.0.0"
+    "vite-plugin-pwa": "2.0.0",
+    "vitest": "4.1.12"
   }
 }

@@ -3,23 +3,23 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --card: #ffffff;
-  --card-foreground: #0f172a;
-  --primary: #0f766e;
-  --primary-foreground: #f0fdfa;
-  --secondary: #e2e8f0;
-  --secondary-foreground: #0f172a;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #ccfbf1;
-  --accent-foreground: #134e4a;
-  --destructive: #dc2626;
-  --destructive-foreground: #fef2f2;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #0f766e;
+  --background: #0b0f12;
+  --foreground: #e7eef4;
+  --card: #11181d;
+  --card-foreground: #e7eef4;
+  --primary: #5eead4;
+  --primary-foreground: #04221d;
+  --secondary: #182127;
+  --secondary-foreground: #cbd5e1;
+  --muted: #141c21;
+  --muted-foreground: #8fa3b3;
+  --accent: #14322f;
+  --accent-foreground: #a7f3e5;
+  --destructive: #f87171;
+  --destructive-foreground: #2a0d0d;
+  --border: #27333b;
+  --input: #27333b;
+  --ring: #5eead4;
   --radius: 0.75rem;
 }
 
@@ -53,7 +53,7 @@
   }
 
   html {
-    color-scheme: light;
+    color-scheme: dark;
   }
 
   body {
@@ -72,6 +72,11 @@
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 
   button,
