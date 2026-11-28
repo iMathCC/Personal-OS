@@ -1,6 +1,8 @@
 import {
   createCourseRequestSchema,
+  createGoalRequestSchema,
   createStudySessionRequestSchema,
+  goalsQuerySchema,
   dashboardStudiesQuerySchema,
   listSessionsQuerySchema,
   seriesQuerySchema,
@@ -16,14 +18,15 @@ import { jsonOk, parseBody as parseBodyRequest } from '../auth/http';
 import type { IdempotentResult } from '../operations/idempotency';
 import {
   createCourse,
+  createGoal,
   createStudySession,
-  currentTimezone,
   getDashboard,
   getObservationsForSession,
   getSeries,
   getSessionDetail,
   listAllCourses,
   listAreas,
+  listGoals,
   listSessions,
   softDeleteSession,
   supersedeObservation,
@@ -47,7 +50,7 @@ async function context(c: AppContext): Promise<StudiesContext> {
     ipHash: c.get('ipHash') ?? null,
     subject: session.userId,
     now: systemClock.now().toISOString(),
-    timezone: await currentTimezone(db),
+    timezone: c.get('userTimezone'),
   };
 }
 
@@ -105,6 +108,18 @@ studiesRoutes.get('/courses', async (c) => {
 studiesRoutes.post('/courses', async (c) => {
   const input = parseBodyRequest(c, createCourseRequestSchema);
   const result = await createCourse(await context(c), mutating(c), input);
+  return idempotentResponse(c, result);
+});
+
+studiesRoutes.get('/goals', async (c) => {
+  const query = parseQuery(c, goalsQuerySchema);
+  const data = await listGoals(await context(c), query);
+  return jsonOk(c, data);
+});
+
+studiesRoutes.post('/goals', async (c) => {
+  const input = parseBodyRequest(c, createGoalRequestSchema);
+  const result = await createGoal(await context(c), mutating(c), input);
   return idempotentResponse(c, result);
 });
 

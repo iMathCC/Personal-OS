@@ -10,7 +10,8 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'prompt',
-      injectRegister: 'auto',
+      // O registro é explícito em PwaUpdatePrompt para mostrar o aviso de nova versão.
+      injectRegister: null,
       includeAssets: ['favicon.svg', 'icon-192.png', 'icon-512.png', 'maskable-512.png'],
       manifest: {
         name: 'Personal OS',

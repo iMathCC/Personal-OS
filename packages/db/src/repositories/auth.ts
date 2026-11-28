@@ -10,6 +10,7 @@ import {
   users,
 } from '../schema';
 import { MAX_ACTIVE_SESSIONS, type RateLimitState } from '@personal-os/domain';
+import { sanitizeAuditJson } from './audit';
 
 export interface UserRow {
   id: string;
@@ -284,8 +285,8 @@ export function auditStatement(input: AuditInput, conditional = false): SQL {
     input.action,
     input.actorType,
     input.actorId ?? null,
-    input.beforeJson ?? null,
-    input.afterJson ?? null,
+    sanitizeAuditJson(input.beforeJson),
+    sanitizeAuditJson(input.afterJson),
     input.requestId ?? null,
     input.ipHash ?? null,
   ] as const;
@@ -469,46 +470,69 @@ export async function readRateLimitState(
   };
 }
 
-export async function writeRateLimitState(
+/**
+ * Reserva uma fatia do limite em uma única instrução atômica.
+ *
+ * Um `read` seguido de `write` permite que requisições concorrentes leiam o
+ * mesmo contador e todas passem. Aqui o `UPDATE` só incrementa quando a janela
+ * atual ainda tem capacidade; zero linhas retornadas significa 429.
+ */
+export async function claimRateLimitSlot(
   db: Database,
-  input: { key: string; windowStart: string; expiresAt: string; count: number; failures: number },
+  input: {
+    key: string;
+    failureKey: string;
+    windowStart: string;
+    expiresAt: string;
+    limit: number;
+    failureLimit: number | null;
+  },
+): Promise<boolean> {
+  const failureLimit = input.failureLimit ?? Number.MAX_SAFE_INTEGER;
+  const rows = await db.all(sql`
+    INSERT INTO rate_limits (key, window_start, count, expires_at, updated_at)
+    VALUES (${input.key}, ${input.windowStart}, 1, ${input.expiresAt}, ${input.windowStart})
+    ON CONFLICT(key) DO UPDATE SET
+      window_start = excluded.window_start,
+      count = CASE
+        WHEN rate_limits.window_start = excluded.window_start THEN rate_limits.count + 1
+        ELSE 1
+      END,
+      expires_at = excluded.expires_at,
+      updated_at = excluded.updated_at
+    WHERE (
+      rate_limits.window_start = excluded.window_start AND rate_limits.count < ${input.limit}
+      OR rate_limits.window_start <> excluded.window_start
+    )
+    AND COALESCE(
+      (
+        SELECT count FROM rate_limits
+        WHERE key = ${input.failureKey} AND window_start = ${input.windowStart}
+      ),
+      0
+    ) < ${failureLimit}
+    RETURNING count
+  `);
+  return rows.length > 0;
+}
+
+/** Incrementa falhas somente após a resposta, sem zerar o contador de requisições. */
+export async function recordRateLimitFailure(
+  db: Database,
+  input: { key: string; windowStart: string; expiresAt: string },
 ): Promise<void> {
-  await db.batch([
-    db
-      .insert(rateLimits)
-      .values({
-        key: input.key,
-        windowStart: input.windowStart,
-        count: input.count,
-        expiresAt: input.expiresAt,
-      })
-      .onConflictDoUpdate({
-        target: rateLimits.key,
-        set: {
-          windowStart: input.windowStart,
-          count: input.count,
-          expiresAt: input.expiresAt,
-          updatedAt: input.windowStart,
-        },
-      }),
-    db
-      .insert(rateLimits)
-      .values({
-        key: `failure:${input.key}`,
-        windowStart: input.windowStart,
-        count: input.failures,
-        expiresAt: input.expiresAt,
-      })
-      .onConflictDoUpdate({
-        target: rateLimits.key,
-        set: {
-          windowStart: input.windowStart,
-          count: input.failures,
-          expiresAt: input.expiresAt,
-          updatedAt: input.windowStart,
-        },
-      }),
-  ]);
+  await db.all(sql`
+    INSERT INTO rate_limits (key, window_start, count, expires_at, updated_at)
+    VALUES (${input.key}, ${input.windowStart}, 1, ${input.expiresAt}, ${input.windowStart})
+    ON CONFLICT(key) DO UPDATE SET
+      window_start = excluded.window_start,
+      count = CASE
+        WHEN rate_limits.window_start = excluded.window_start THEN rate_limits.count + 1
+        ELSE 1
+      END,
+      expires_at = excluded.expires_at,
+      updated_at = excluded.updated_at
+  `);
 }
 
 export async function cleanupExpiredRateLimits(db: Database, now: string): Promise<void> {

@@ -143,5 +143,11 @@ export const auditLog = sqliteTable(
     check('audit_log_ip_hash_length', sql`${table.ipHash} IS NULL OR length(${table.ipHash}) = 64`),
     index('idx_audit_entity').on(table.entityType, table.entityId, table.createdAt),
     index('idx_audit_created').on(table.createdAt),
+    index('idx_audit_request_entity').on(
+      table.requestId,
+      table.entityType,
+      table.entityId,
+      table.action,
+    ),
   ],
 );

@@ -58,6 +58,17 @@ VALUES (
   'increase'
 );
 
+-- Marco da Entrega 13: garante que o drill de backup/restauração cubra dados de Objetivos.
+INSERT INTO goal_milestones (id, goal_id, title, due_date, status, source_id)
+VALUES (
+  '01f00000-0000-7000-8000-000000000070',
+  '01f00000-0000-7000-8000-000000000040',
+  'Marco ficticio de estudo',
+  '2026-02-01',
+  'pending',
+  'src_manual'
+);
+
 INSERT INTO events (id, area_id, course_id, study_session_id, title, occurred_at, local_date, timezone, source_id)
 VALUES (
   '01f00000-0000-7000-8000-000000000050',

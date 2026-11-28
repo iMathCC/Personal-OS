@@ -22,6 +22,83 @@
       "when": 1795218120000,
       "tag": "0002_audit_no_replace",
       "breakpoints": false
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795261056973,
+      "tag": "0003_core_studies",
+      "breakpoints": false
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795303349323,
+      "tag": "0004_goals_milestones",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1795354869672,
+      "tag": "0005_execution_layer",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795358270960,
+      "tag": "0006_weekly_reviews",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1795363769497,
+      "tag": "0007_strategic_planning",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1795368268085,
+      "tag": "0008_life_data",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795374980466,
+      "tag": "0009_decision_alert_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1795395032042,
+      "tag": "0010_index_alignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1795488000000,
+      "tag": "0011_idempotency_no_replace",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795642078110,
+      "tag": "0012_chilly_praxagora",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795774023466,
+      "tag": "0013_overrated_nebula",
+      "breakpoints": true
     }
   ]
 }

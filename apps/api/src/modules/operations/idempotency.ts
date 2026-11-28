@@ -38,6 +38,12 @@ export interface IdempotencyRequest {
   rawBody: string;
   /** Instante UTC ISO-8601 com ms, injetado pelo chamador. */
   now: string;
+  /**
+   * Regra de negócio que depende do banco. Só roda quando a requisição NÃO é
+   * replay: um replay válido precisa devolver a resposta original mesmo que o
+   * estado atual tornasse a criação inválida (ex.: título já existente).
+   */
+  validate?: () => Promise<void> | void;
 }
 
 export interface MutationPlan {
@@ -91,10 +97,11 @@ async function replayFromStore(
 /**
  * Executa uma mutação exatamente uma vez por chave canônica.
  *
- * A reserva permanente é gravada ANTES da mutação; o `claim` na tabela
- * operacional é o guard de concorrência: duas requisições concorrentes
- * produzem um único `db.batch()` vencedor e o perdedor recupera o resultado
- * original de `operation_results` (append-only).
+ * A reserva permanente, o `claim` operacional, a mutação, a auditoria e o
+ * resultado são gravados no MESMO `db.batch()`. Se qualquer statement falhar,
+ * nada é confirmado — inclusive a reserva — e a mesma chave pode ser
+ * repetida com segurança. O `claim` é o guard de concorrência: a segunda
+ * requisição concorrente aborta o lote e recupera o resultado canônico.
  */
 export async function executeIdempotent(
   input: IdempotencyRequest,
@@ -112,19 +119,25 @@ export async function executeIdempotent(
   const opId = newId();
   const expiresAt = new Date(Date.parse(input.now) + IDEMPOTENCY_TTL_MS).toISOString();
 
-  await batchSql(input.db, [
-    reserveIdempotencyStatement({ key, opId, requestHash, createdAt: input.now }),
-  ]);
+  const replayed = await replayFromStore(input.db, key, requestHash);
+  if (replayed !== null) return replayed;
 
+  /**
+   * Reservas sem resultado são estado legado: antes da gravação atômica, uma
+   * falha do lote podia confirmar apenas a reserva. Não há como distinguir
+   * esse caso de uma operação em voo sem novo estado, então a repetição é
+   * recusada em vez de arriscar uma segunda mutação. Reservas novas nunca
+   * ficam órfãs porque são gravadas no mesmo lote do resultado.
+   */
   const reservation = await findReservation(input.db, key);
-  if (reservation === undefined || reservation.operationId !== opId) {
-    if (reservation !== undefined && reservation.requestHash !== requestHash) {
+  if (reservation !== undefined && reservation.operationId !== opId) {
+    if (reservation.requestHash !== requestHash) {
       throw conflict('Chave idempotente já usada com conteúdo diferente.');
     }
-    const replayed = await replayFromStore(input.db, key, requestHash);
-    if (replayed !== null) return replayed;
     throw conflict('Operação idempotente em andamento; tente novamente.');
   }
+
+  await input.validate?.();
 
   const mutation = plan({ opId, now: input.now });
   // Limite verificado ANTES de qualquer mutação de domínio.
@@ -133,6 +146,7 @@ export async function executeIdempotent(
 
   try {
     await batchSql(input.db, [
+      reserveIdempotencyStatement({ key, opId, requestHash, createdAt: input.now }),
       claimIdempotencyStatement({
         key,
         method: input.method.toUpperCase(),
@@ -164,6 +178,11 @@ export async function executeIdempotent(
     // gravou o resultado canônico, que deve ser devolvido ao chamador.
     const replayed = await replayFromStore(input.db, key, requestHash);
     if (replayed !== null) return replayed;
+    // Colisão de índice único entre requisições concorrentes é erro de
+    // negócio, não falha interna (a validação sequencial já devolve 409).
+    if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) {
+      throw conflict('Recurso já existe.');
+    }
     throw error;
   }
 

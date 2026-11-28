@@ -8,19 +8,28 @@ import {
 } from '@/lib/navigation';
 
 describe('navegação principal', () => {
-  it('expõe as dez áreas previstas, com caminhos únicos', () => {
-    expect(NAVIGATION_ITEMS).toHaveLength(10);
-    expect(new Set(NAVIGATION_ITEMS.map((item) => item.path)).size).toBe(10);
+  it('expõe áreas com caminhos únicos e grupos conhecidos', () => {
+    expect(NAVIGATION_ITEMS.length).toBeGreaterThan(0);
+    expect(new Set(NAVIGATION_ITEMS.map((item) => item.path)).size).toBe(NAVIGATION_ITEMS.length);
+    expect(new Set(NAVIGATION_ITEMS.map((item) => item.key)).size).toBe(NAVIGATION_ITEMS.length);
     expect(NAVIGATION_GROUPS.map((group) => group.id)).toEqual(['core', 'life', 'system']);
   });
 
-  it('marca visão geral, estudos e configurações como disponíveis', () => {
-    const available = NAVIGATION_ITEMS.filter((item) => item.availability === 'available').map(
-      (item) => item.key,
+  it('inclui as rotas principais do D36/D37 como disponíveis', () => {
+    const available = new Set(
+      NAVIGATION_ITEMS.filter((item) => item.availability === 'available').map((item) => item.key),
     );
-    expect(available).toEqual(['overview', 'studies', 'settings']);
-    expect(NAVIGATION_ITEMS.some((item) => item.availability === 'not-configured')).toBe(true);
-    expect(NAVIGATION_ITEMS.some((item) => item.availability === 'planned')).toBe(true);
+    const keys = [
+      'overview',
+      'today',
+      'dailyReview',
+      'observations',
+      'studies',
+      'settings',
+    ] as const;
+    for (const key of keys) {
+      expect(available.has(key)).toBe(true);
+    }
   });
 
   it('resolve a rota ativa sem confundir a raiz com os demais caminhos', () => {

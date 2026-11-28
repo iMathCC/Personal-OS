@@ -27,6 +27,11 @@ export function assertSetupAvailable(user: UserSetupState | null): void {
   }
 }
 
+function isExpired(expiresAt: string, now: number): boolean {
+  const expiresAtMs = Date.parse(expiresAt);
+  return !Number.isFinite(expiresAtMs) || expiresAtMs <= now;
+}
+
 export function assertChallengeUsable(
   challenge: ChallengeState | null,
   expectedPurpose: AuthPurpose,
@@ -36,14 +41,14 @@ export function assertChallengeUsable(
     challenge === null ||
     challenge.consumedAt !== null ||
     challenge.purpose !== expectedPurpose ||
-    Date.parse(challenge.expiresAt) <= now
+    isExpired(challenge.expiresAt, now)
   ) {
     throw unauthenticated('Desafio inválido ou expirado.');
   }
 }
 
 export function assertRecoveryTokenUsable(token: RecoveryTokenState | null, now: number): void {
-  if (token === null || token.consumedAt !== null || Date.parse(token.expiresAt) <= now) {
+  if (token === null || token.consumedAt !== null || isExpired(token.expiresAt, now)) {
     throw unauthenticated('Token de recuperação inválido ou expirado.');
   }
 }

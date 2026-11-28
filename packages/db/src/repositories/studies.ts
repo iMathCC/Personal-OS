@@ -2,6 +2,8 @@ import { sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../client';
 import {
   courses,
+  goalMetrics,
+  goals,
   idempotencyKeys,
   idempotencyKeyReservations,
   metricObservations,
@@ -63,6 +65,23 @@ export interface ObservationRow {
   studySessionId: string | null;
   courseId: string | null;
   createdOperationId: string | null;
+}
+
+/** Meta de Estudos já vinculada à métrica `study_minutes`. */
+export interface StudyGoalRow {
+  id: string;
+  title: string;
+  horizon: string;
+  status: string;
+  priority: number;
+  startDate: string | null;
+  targetDate: string | null;
+  targetMinutes: number;
+  progressMode: string;
+  manualProgress: number | null;
+  sourceId: string;
+  version: number;
+  createdAt: string;
 }
 
 export interface ReservationRow {
@@ -243,6 +262,7 @@ export interface ObservationSampleRow {
   localDate: string;
   /** O filtro SQL garante NOT NULL; o cast tipado evita checagem redundante. */
   valueNum: number;
+  courseId: string | null;
 }
 
 export function listActiveObservationsForMetric(
@@ -251,21 +271,74 @@ export function listActiveObservationsForMetric(
   from: string,
   to: string,
   limit = 10_000,
+  courseId?: string,
 ): Promise<ObservationSampleRow[]> {
+  const conditions = [
+    sql`${metricObservations.metricId} = ${metricId}`,
+    sql`${metricObservations.localDate} BETWEEN ${from} AND ${to}`,
+    sql`${metricObservations.supersededBy} IS NULL`,
+    sql`${metricObservations.valueNum} IS NOT NULL`,
+  ];
+  if (courseId !== undefined) {
+    conditions.push(sql`${metricObservations.courseId} = ${courseId}`);
+  }
   return db
     .select({
       id: metricObservations.id,
       localDate: metricObservations.localDate,
       valueNum: sql<number>`${metricObservations.valueNum}`,
+      courseId: metricObservations.courseId,
     })
     .from(metricObservations)
-    .where(
-      sql`${metricObservations.metricId} = ${metricId}
-        AND ${metricObservations.localDate} BETWEEN ${from} AND ${to}
-        AND ${metricObservations.supersededBy} IS NULL
-        AND ${metricObservations.valueNum} IS NOT NULL`,
-    )
+    .where(sql.join(conditions, sql` AND `))
     .orderBy(sql`${metricObservations.localDate} ASC, ${metricObservations.id} ASC`)
+    .limit(limit);
+}
+
+/** Usa o índice único parcial `goals_area_title_unique` para evitar erro 500. */
+export async function findStudyGoalByTitle(
+  db: Database,
+  areaId: string,
+  title: string,
+): Promise<{ id: string } | undefined> {
+  const rows = await db
+    .select({ id: goals.id })
+    .from(goals)
+    .where(
+      sql`${goals.areaId} = ${areaId} AND ${goals.title} = ${title} AND ${goals.deletedAt} IS NULL`,
+    )
+    .limit(1);
+  return rows[0];
+}
+
+/** Metas de estudo com alvo em minutos, usando os índices já existentes. */
+export function listStudyGoals(db: Database, areaId: string, limit = 100): Promise<StudyGoalRow[]> {
+  return db
+    .select({
+      id: goals.id,
+      title: goals.title,
+      horizon: goals.horizon,
+      status: goals.status,
+      priority: goals.priority,
+      startDate: goals.startDate,
+      targetDate: goals.targetDate,
+      targetMinutes: sql<number>`${goalMetrics.targetValue}`,
+      progressMode: goals.progressMode,
+      manualProgress: goals.manualProgress,
+      sourceId: goals.sourceId,
+      version: goals.version,
+      createdAt: goals.createdAt,
+    })
+    .from(goals)
+    .innerJoin(goalMetrics, sql`${goalMetrics.goalId} = ${goals.id}`)
+    .innerJoin(metrics, sql`${metrics.id} = ${goalMetrics.metricId}`)
+    .where(
+      sql`${goals.areaId} = ${areaId}
+        AND ${goals.deletedAt} IS NULL
+        AND ${metrics.key} = 'study_minutes'
+        AND ${goalMetrics.direction} = 'increase'`,
+    )
+    .orderBy(sql`${goals.targetDate} ASC, ${goals.createdAt} DESC`)
     .limit(limit);
 }
 
@@ -340,7 +413,10 @@ export function claimIdempotencyStatement(input: {
     VALUES (${input.key}, ${input.method}, ${input.path}, ${input.requestHash}, 202, ${input.createdAt}, ${input.expiresAt}, ${input.subject}, ${input.opId}, 'pending', 1)`;
 }
 
-/** Identidade permanente da chave; `DO NOTHING` preserva a primeira gravação. */
+/**
+ * Identidade permanente da chave. O `WHERE NOT EXISTS` preserva a primeira
+ * gravação sem disparar a guarda anti-REPLACE (que também cobre `DO NOTHING`).
+ */
 export function reserveIdempotencyStatement(input: {
   key: string;
   opId: string;
@@ -348,10 +424,11 @@ export function reserveIdempotencyStatement(input: {
   createdAt: string;
 }): SQL {
   return sql`INSERT INTO idempotency_key_reservations (key, operation_id, request_hash, created_at)
-    VALUES (${input.key}, ${input.opId}, ${input.requestHash}, ${input.createdAt})
-    ON CONFLICT(key) DO NOTHING`;
+    SELECT ${input.key}, ${input.opId}, ${input.requestHash}, ${input.createdAt}
+    WHERE NOT EXISTS (SELECT 1 FROM idempotency_key_reservations WHERE key = ${input.key})`;
 }
 
+/** Resultado imutável: repetição legítima não altera a resposta original. */
 export function insertOperationResultStatement(input: {
   key: string;
   opId: string;
@@ -360,8 +437,8 @@ export function insertOperationResultStatement(input: {
   bodyJson: string;
 }): SQL {
   return sql`INSERT INTO operation_results (key, operation_id, request_hash, status_code, body_json)
-    VALUES (${input.key}, ${input.opId}, ${input.requestHash}, ${input.statusCode}, ${input.bodyJson})
-    ON CONFLICT(key) DO NOTHING`;
+    SELECT ${input.key}, ${input.opId}, ${input.requestHash}, ${input.statusCode}, ${input.bodyJson}
+    WHERE NOT EXISTS (SELECT 1 FROM operation_results WHERE key = ${input.key})`;
 }
 
 export function completeIdempotencyStatement(input: {
@@ -392,6 +469,34 @@ export function insertCourseStatement(input: {
   return sql`INSERT INTO courses
     (id, area_id, title, provider, status, start_date, target_end_date, planned_minutes, source_id, version, created_operation_id, created_at, updated_at)
     VALUES (${input.id}, '01a1fb52-074d-7043-a390-78a0731bdb52', ${input.title}, ${input.provider}, ${input.status}, ${input.startDate}, ${input.targetEndDate}, ${input.plannedMinutes}, ${input.sourceId}, 1, ${input.opId}, ${input.now}, ${input.now})`;
+}
+
+export function insertGoalStatement(input: {
+  id: string;
+  title: string;
+  horizon: string;
+  status: string;
+  priority: number;
+  startDate: string | null;
+  targetDate: string | null;
+  sourceId: string;
+  opId: string;
+  now: string;
+}): SQL {
+  return sql`INSERT INTO goals
+    (id, area_id, title, horizon, status, priority, start_date, target_date, progress_mode, source_id, version, created_operation_id, created_at, updated_at)
+    VALUES (${input.id}, '01a1fb52-074d-7043-a390-78a0731bdb52', ${input.title}, ${input.horizon}, ${input.status}, ${input.priority}, ${input.startDate}, ${input.targetDate}, 'metrics', ${input.sourceId}, 1, ${input.opId}, ${input.now}, ${input.now})`;
+}
+
+export function insertGoalMetricStatement(input: {
+  goalId: string;
+  metricId: string;
+  targetMinutes: number;
+  now: string;
+}): SQL {
+  return sql`INSERT INTO goal_metrics
+    (goal_id, metric_id, baseline_value, target_value, direction, weight, created_at)
+    VALUES (${input.goalId}, ${input.metricId}, 0, ${input.targetMinutes}, 'increase', 1, ${input.now})`;
 }
 
 export function insertStudySessionStatement(input: {

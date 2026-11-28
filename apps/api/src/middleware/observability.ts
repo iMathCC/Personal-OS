@@ -44,6 +44,32 @@ export function securityLogFields(
   };
 }
 
+export type DataStoreFailureCategory = 'unavailable' | 'constraint' | 'execution';
+
+/**
+ * Diagnóstico interno de falha do D1. Nunca inclui mensagem, SQL, valores,
+ * corpo, cookies ou tokens — apenas categoria e nome técnico sanitizado.
+ */
+export function dataStoreFailureFields(input: {
+  requestId: string;
+  path: string;
+  status: number;
+  code: string;
+  category: DataStoreFailureCategory;
+  errorName: string;
+}): Record<string, string | number> {
+  return {
+    level: 'error',
+    event: 'data_store_failure',
+    requestId: input.requestId,
+    path: input.path.split('?')[0] ?? '',
+    status: input.status,
+    code: input.code,
+    category: input.category,
+    errorName: input.errorName,
+  };
+}
+
 /** Log de conclusão por requisição, com duração relativa (latência local). */
 export const requestLogging = createMiddleware<AppEnv>(async (c, next) => {
   const start = Date.now();
