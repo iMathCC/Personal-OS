@@ -144,4 +144,48 @@ describe('Observações pessoais (D37)', () => {
     expect(body.data.coverage.missingDays).toBe(2);
     expect(body.data.limitations.some((l) => /zero|imputação/i.test(l))).toBe(true);
   });
+
+  it('duas correções concorrentes na mesma versão: apenas uma sucede', async () => {
+    const obs = await createObs(client, 'race-base');
+    const [r1, r2] = await Promise.all([
+      client.request(`/observations/${obs.id}/correct`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'race-a', 'If-Match': `"${obs.version}"` },
+        json: { title: 'Correção A' },
+      }),
+      client.request(`/observations/${obs.id}/correct`, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'race-b', 'If-Match': `"${obs.version}"` },
+        json: { title: 'Correção B' },
+      }),
+    ]);
+
+    const statuses = [r1.status, r2.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const old = await bodyOf<Envelope<Obs>>(await client.request(`/observations/${obs.id}`));
+    expect(old.data.status).toBe('superseded');
+    expect(old.data.supersededBy).toBeTruthy();
+
+    const list = await bodyOf<Envelope<Obs[]>>(await client.request('/observations?status=active'));
+    const activeCorrections = list.data.filter((o) => o.correctsId === obs.id);
+    expect(activeCorrections).toHaveLength(1);
+  });
+
+  it('não corrige observação já supersedida/deletada', async () => {
+    const obs = await createObs(client, 'sup-base');
+    const first = await client.request(`/observations/${obs.id}/correct`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'sup-1', 'If-Match': `"${obs.version}"` },
+      json: { title: 'Primeira correção' },
+    });
+    expect(first.status).toBe(200);
+
+    const second = await client.request(`/observations/${obs.id}/correct`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'sup-2', 'If-Match': `"${obs.version}"` },
+      json: { title: 'Segunda correção' },
+    });
+    expect(second.status).toBe(409);
+  });
 });

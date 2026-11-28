@@ -28,12 +28,19 @@ const LIMITED_PATH_PREFIXES = [
   '/api/v1/tasks/',
   '/api/v1/execution/',
   '/api/v1/intelligence/',
+  '/api/v1/adaptation/',
   '/api/v1/planning/',
   '/api/v1/life/',
+  '/api/v1/observations/',
 ] as const;
 
 function isRegisteredApiPath(path: string): boolean {
-  return LIMITED_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return LIMITED_PATH_PREFIXES.some((prefix) => {
+    if (path.startsWith(prefix)) return true;
+    // Cobre endpoint raiz sem barra final (ex.: /api/v1/observations).
+    const root = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+    return path === root;
+  });
 }
 
 /** Rotas com limites próprios já cobertas pelo middleware central. */

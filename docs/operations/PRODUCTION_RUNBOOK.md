@@ -50,7 +50,7 @@ npx wrangler deploy --config apps/api/wrangler.production.toml --dry-run
 9. Registrar versão/ID retornado.
 
 ## 7. Verificação pós-deploy
-- `GET /api/v1/health` => 200, `status=ok`, `db=ok`, `ready=true`, checks ok.
+- `GET /api/v1/health` => 200 com `{status:"ok", db:"ok", version, time}` (contrato simples; sem `ready/checks` granulares). Em degradação, 503 com `status="degraded"` e `db="unavailable"`.
 - HSTS, CSP, `X-Content-Type-Options`, `Cache-Control: no-store` em API.
 - SPA `/`, deep link, assets, manifest/sw.
 - Auth CSRF endpoint responde; mutações sem CSRF/origem indevida bloqueadas.

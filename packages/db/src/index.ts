@@ -1,4 +1,4 @@
-export { batchSql, createDb, type Database } from './client';
+export { assertRowChangedStatement, batchSql, createDb, type Database } from './client';
 export { newId } from './ids';
 export * from './repositories/audit';
 export * from './repositories/auth';

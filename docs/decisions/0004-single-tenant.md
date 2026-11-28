@@ -13,9 +13,16 @@ O Personal OS é descrito como sistema pessoal. Multiusuário não é requisito.
 Uma implantação atende **um único usuário**. Não haverá:
 
 - cadastro público nem convites;
-- `user_id` em entidades de domínio;
-- papéis/permissões;
-- compartilhamento.
+- `user_id`/`owner_id`/`tenant_id` em entidades de domínio pessoais (incluindo `personal_observations`);
+- papéis/permissões/RBAC multiusuário;
+- compartilhamento entre usuários.
+
+Princípios explícitos:
+
+- **Uma instalação = uma pessoa.** O modelo de dados não declara suporte a múltiplos usuários na mesma instância.
+- **Isolamento por instância/deployment.** Cada implantação tem seu próprio banco/D1 e estado; não há segregação lógica entre usuários no mesmo banco porque não há múltiplos usuários.
+- **Autenticação e autorização protegem a instância.** Sessão válida do único usuário é o gate; CSRF/rate-limit/idempotência continuam obrigatórios.
+- **Evolução multiusuário exige nova decisão.** Qualquer suporte futuro a múltiplos usuários na mesma instância exigirá ADR novo, revisão de modelo de dados (incluindo ownership/tenant), autorização, migrações, backfill, estratégia de isolamento e reavaliação de contratos/APIs. Não deve ser introduzido implicitamente.
 
 A tabela `users` tem uma linha, usada para preferências. A autorização é “sessão válida do único usuário”. Dados continuam isolados por implantação/banco.
 

@@ -1,5 +1,6 @@
 import type { SQL } from 'drizzle-orm';
 import {
+  assertRowChangedStatement,
   batchSql,
   claimIdempotencyStatement,
   completeIdempotencyStatement,
@@ -52,6 +53,12 @@ export interface MutationPlan {
   bodyJson: string;
   /** Mutação + auditoria, nesta ordem, dentro do mesmo `db.batch()`. */
   statements: readonly SQL[];
+  /**
+   * Índices (relativos a `statements`) que devem afetar >=1 linha.
+   * Usado para guards otimistas em D1 batch, onde `changes()` entre statements
+   * não é confiável como guard SQL separado.
+   */
+  assertChangedAt?: readonly number[];
 }
 
 export interface MutationContext {
@@ -144,6 +151,12 @@ export async function executeIdempotent(
   assertResultSize(mutation.bodyJson);
   const { mirror } = mirrorFor(mutation.bodyJson);
 
+  const guardedStatements = [...mutation.statements];
+  const assertIndices = [...(mutation.assertChangedAt ?? [])].sort((a, b) => b - a);
+  for (const index of assertIndices) {
+    guardedStatements.splice(index + 1, 0, assertRowChangedStatement());
+  }
+
   try {
     await batchSql(input.db, [
       reserveIdempotencyStatement({ key, opId, requestHash, createdAt: input.now }),
@@ -157,7 +170,7 @@ export async function executeIdempotent(
         expiresAt,
         createdAt: input.now,
       }),
-      ...mutation.statements,
+      ...guardedStatements,
       insertOperationResultStatement({
         key,
         opId,
@@ -182,6 +195,17 @@ export async function executeIdempotent(
     // negócio, não falha interna (a validação sequencial já devolve 409).
     if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) {
       throw conflict('Recurso já existe.');
+    }
+    // Guard otimista: UPDATE crítico não afetou a linha esperada.
+    if (error instanceof Error && /VERSION_CONFLICT/i.test(error.message)) {
+      throw conflict('Versão divergente ou recurso já modificado; recarregue e tente novamente.');
+    }
+    // Guard atômico em D1 batch (CHECK violation por changes()=0).
+    if (
+      error instanceof Error &&
+      /rate_limits_count_non_negative|__version_conflict__/i.test(error.message)
+    ) {
+      throw conflict('Versão divergente ou recurso já modificado; recarregue e tente novamente.');
     }
     throw error;
   }

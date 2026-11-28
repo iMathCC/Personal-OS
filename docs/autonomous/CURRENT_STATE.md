@@ -6,6 +6,7 @@
 - Node: v24.11.1 (validação local candidato) / npm 11.6.2
 - OpenCode: v2.2.6 (`/home/matheus/.opencode/bin/opencode`)
 - D38: candidato curado de publicação (D35 closure + D36 + D37) validado em ambiente isolado; sem commit/push/deploy. Evidência: `docs/quality/DELIVERY_38_PUBLISH_CANDIDATE.md`.
+- D45: correção integral dos achados D44 no PR #1 (branch de release). D44-001 errata documental health; D44-002 rate limit central observations/adaptation; D44-003 guard atômico de concorrência em D1 batch; D44-004 ADR single-user reforçado. Validações locais em andamento/concluídas conforme `docs/quality/DELIVERY_45_D44_FINDINGS_RESOLUTION.md`; sem merge/deploy/operações remotas.
 - D42: revisão final de escopo e empacotamento de PR. Manifests D41 saneados (UNRESOLVED removidos), sem segredos/artefatos indevidos, PR pronto para autorização. Sem publicação remota. Evidência: `docs/quality/DELIVERY_42_FINAL_RELEASE_APPROVAL.md`.
 - D41: fechamento de release/reprodutibilidade. `npm ci` real PASS em checkout limpo; format/lint/typecheck/test/integration/build/db:generate/backup:drill/audit-high/E2E D36+D37 PASS no clean checkout. CI remoto e deploy real bloqueados por autorização/pré-condição externa. Evidência: `docs/quality/DELIVERY_41_RELEASE_CLOSURE.md`.
 - D40: operacionalização local/preparatória de produção (runbooks ops, health readiness/checks aditivo, audit classificado, plano deploy/rollback); sem operações remotas. Evidência: `docs/quality/DELIVERY_40_PRODUCTION_OPERATIONALIZATION.md`.

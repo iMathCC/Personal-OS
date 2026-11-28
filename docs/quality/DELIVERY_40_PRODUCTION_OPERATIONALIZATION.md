@@ -1,7 +1,9 @@
 # Delivery 40 — Production Operationalization & Reliability Completion
 
+> **Errata D45 (2026-11-28, rastreabilidade D44-001)**: Este relatório originalmente afirmava que o endpoint `/api/v1/health` havia sido estendido com `ready` e `checks {process,app,db}` e listava alterações em `packages/shared/src/health.ts`, `apps/api/src/modules/health/routes.ts` e `apps/api/test/health.test.ts`. Na revisão D44 verificou-se que essas alterações de código **não** foram incluídas no manifesto/candidato publicado; o endpoint implementado/publicado permanece no contrato simples `{status, db, version, time}` (200 DB ok, 503 degradado), sem dados sensíveis. As afirmações abaixo foram corrigidas com rastreabilidade; o texto original incorreto não é apresentado como fato vigente.
+
 ## 1. Resumo executivo
-D40 executou operacionalização local/preparatória no candidato de release `/tmp/opencode/d38-candidate` (base `9794b82911e3afd89199cf2aa08ad2b9aa8ae610`), sem operações remotas, sem commit/push/PR/merge/deploy, sem tocar `https://localhost:8788`. Foram criados runbooks operacionais exigidos, reforçado o endpoint `/api/v1/health` com semântica de readiness/checks aditiva e sem dados sensíveis, e consolidada a avaliação de prontidão. A conclusão remota de produção **não** foi comprovada; faltam autorizações/valores remotos e CI remoto.
+D40 executou operacionalização local/preparatória no candidato de release `/tmp/opencode/d38-candidate` (base `9794b82911e3afd89199cf2aa08ad2b9aa8ae610`), sem operações remotas, sem commit/push/PR/merge/deploy, sem tocar `https://localhost:8788`. Foram criados runbooks operacionais exigidos e consolidada a avaliação de prontidão. ~~Afirmação original incorreta: "reforçado o endpoint `/api/v1/health` com semântica de readiness/checks aditiva..."~~ **Correção D45**: o endpoint `/api/v1/health` permanece com contrato simples `{status, db, version, time}`; não há `ready`/`checks` granulares implementados/publicados. A conclusão remota de produção **não** foi comprovada; faltam autorizações/valores remotos e CI remoto.
 
 ## 2. Estado inicial e final do repositório
 
@@ -14,9 +16,9 @@ D40 executou operacionalização local/preparatória no candidato de release `/t
 | Operações remotas | nenhuma | nenhuma |
 
 ## 3. Mudanças implementadas
-- `packages/shared/src/health.ts`: schema de health estendido de forma aditiva com `ready` e `checks {process,app,db}`.
-- `apps/api/src/modules/health/routes.ts`: endpoint `/api/v1/health` retorna readiness/checks; 200 quando DB ok, 503 degradado; sem info sensível.
-- `apps/api/test/health.test.ts`: teste atualizado para novo contrato.
+- ~~`packages/shared/src/health.ts`: schema de health estendido de forma aditiva com `ready` e `checks {process,app,db}`.~~ **Errata D45**: não incluído/publicado no candidato; contrato real permanece `{status, db, version, time}`.
+- ~~`apps/api/src/modules/health/routes.ts`: endpoint `/api/v1/health` retorna readiness/checks; 200 quando DB ok, 503 degradado; sem info sensível.~~ **Errata D45**: endpoint real/publicado retorna `{status, db, version, time}`; 200 quando DB ok, 503 degradado; sem info sensível.
+- ~~`apps/api/test/health.test.ts`: teste atualizado para novo contrato.~~ **Errata D45**: teste real/publicado valida contrato simples.
 - `docs/operations/PRODUCTION_RUNBOOK.md`: runbook de produção.
 - `docs/operations/DEPLOYMENT.md`: procedimento de deploy e rollback.
 - `docs/operations/BACKUP_AND_RECOVERY.md`: backup/restore/drill/limitações.
@@ -28,7 +30,7 @@ D40 executou operacionalização local/preparatória no candidato de release `/t
 
 | Problema | Estado | Correção/Evidência |
 |---|---|---|
-| Health check não distinguia explicitamente processo/app/db/dependências/ready | corrigido localmente | Schema/rota/teste atualizados; typecheck e teste health PASS |
+| Health check não distinguia explicitamente processo/app/db/dependências/ready | **não corrigido no código publicado (errata D45)** | Afirmação original incorreta; endpoint publicado permanece com contrato simples `{status,db,version,time}`. Readiness granular permanece limitação futura. |
 | Documentação operacional D40 obrigatória ausente | corrigido localmente | 6 docs criados em `docs/operations/` |
 | `wrangler.production.toml` ausente | esperado/bloqueado por pré-condição | Arquivo é gitignored e gerado por `deploy:prepare`; `check-production-config.mjs` valida. Não criar config fictícia. |
 | CI remoto não executado | bloqueado | Requer publicação autorizada/PR |
@@ -75,7 +77,7 @@ D40 executou operacionalização local/preparatória no candidato de release `/t
 
 ## 10. Estado de observabilidade
 - Logs estruturados/requestId/path sem query/sem PII sensível já presentes (`observability.ts`, `error.ts`).
-- `/api/v1/health` agora inclui `ready` e `checks` (process/app/db) com 200/503.
+- ~~`/api/v1/health` agora inclui `ready` e `checks` (process/app/db) com 200/503.~~ **Errata D45**: `/api/v1/health` publicado retorna `{status,db,version,time}` com 200/503; não inclui `ready/checks` granulares.
 - Observabilidade Cloudflare configurada no modelo wrangler (`redact_query_string=true`, logs/traces conforme modelo). Validação em produção: NOT RUN.
 
 ## 11. Estado de performance

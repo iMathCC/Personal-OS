@@ -324,6 +324,8 @@ export async function correctObservation(
     return {
       status: 200,
       bodyJson: envelope(ctx.requestId, replacement),
+      // Índice 1 = supersede: deve afetar exatamente a versão esperada.
+      assertChangedAt: [1],
       statements: [
         insertPersonalObservationStatement({
           id: replacementId,

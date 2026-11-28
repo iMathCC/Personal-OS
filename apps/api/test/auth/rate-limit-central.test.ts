@@ -1,10 +1,12 @@
 import { claimRateLimitSlot, createDb } from '@personal-os/db';
+import { RATE_LIMIT_RULES, windowStartFor } from '@personal-os/domain';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { all } from '../db/helpers';
-import { newClient, performSetup, resetAuthDatabase, testDb } from './helpers';
+import { all, applyObservationsSchema, executeSql, resetDatabase } from '../db/helpers';
+import { newClient, performSetup, testDb } from './helpers';
 
 beforeEach(async () => {
-  await resetAuthDatabase();
+  await resetDatabase();
+  await applyObservationsSchema();
 });
 
 describe('rate limit central', () => {
@@ -68,5 +70,78 @@ describe('rate limit central', () => {
       Array.from({ length: 12 }, () => claimRateLimitSlot(db, input)),
     );
     expect(results.filter((allowed) => allowed)).toHaveLength(3);
+  });
+
+  it('permite requests dentro do limite em observations e adaptation', async () => {
+    const setup = await performSetup();
+    const obsRes = await setup.client.request('/observations');
+    expect(obsRes.status).toBeLessThan(400);
+    expect(obsRes.status).not.toBe(429);
+
+    const adaptRes = await setup.client.request('/adaptation/dashboard');
+    expect(adaptRes.status).toBeLessThan(400);
+    expect(adaptRes.status).not.toBe(429);
+
+    const reads = await all<{ key: string; count: number }>(
+      "SELECT key, count FROM rate_limits WHERE key LIKE 'auth:read:%'",
+    );
+    const userRead = reads.find((r) => r.key.includes(setup.userId));
+    expect(userRead).toBeDefined();
+    expect(userRead!.count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('aplica rate limit central em observations (leitura e escrita)', async () => {
+    const setup = await performSetup();
+    const readRule = RATE_LIMIT_RULES.authenticatedRead;
+    const writeRule = RATE_LIMIT_RULES.authenticatedWrite;
+    const now = Date.now();
+    const readWindow = windowStartFor(now, readRule.windowMs);
+    const writeWindow = windowStartFor(now, writeRule.windowMs);
+    const readExpires = new Date(readWindow + readRule.windowMs).toISOString();
+    const writeExpires = new Date(writeWindow + writeRule.windowMs).toISOString();
+    const readWindowIso = new Date(readWindow).toISOString();
+    const writeWindowIso = new Date(writeWindow).toISOString();
+
+    await executeSql(
+      `INSERT OR REPLACE INTO rate_limits (key, window_start, count, expires_at)
+       VALUES ('auth:read:${setup.userId}', '${readWindowIso}', ${readRule.limit}, '${readExpires}')`,
+    );
+    await executeSql(
+      `INSERT OR REPLACE INTO rate_limits (key, window_start, count, expires_at)
+       VALUES ('auth:write:${setup.userId}', '${writeWindowIso}', ${writeRule.limit}, '${writeExpires}')`,
+    );
+
+    const readRes = await setup.client.request('/observations');
+    expect(readRes.status).toBe(429);
+    expect(readRes.headers.get('Retry-After')).toBeTruthy();
+
+    const writeRes = await setup.client.request('/observations', {
+      method: 'POST',
+      json: {
+        kind: 'executed',
+        title: 'x',
+        observedAt: '2026-11-10T12:00:00.000Z',
+        timezone: 'UTC',
+      },
+    });
+    expect(writeRes.status).toBe(429);
+  });
+
+  it('aplica rate limit central em adaptation (leitura)', async () => {
+    const setup = await performSetup();
+    const readRule = RATE_LIMIT_RULES.authenticatedRead;
+    const now = Date.now();
+    const readWindow = windowStartFor(now, readRule.windowMs);
+    const readExpires = new Date(readWindow + readRule.windowMs).toISOString();
+    const readWindowIso = new Date(readWindow).toISOString();
+
+    await executeSql(
+      `INSERT OR REPLACE INTO rate_limits (key, window_start, count, expires_at)
+       VALUES ('auth:read:${setup.userId}', '${readWindowIso}', ${readRule.limit}, '${readExpires}')`,
+    );
+
+    const readRes = await setup.client.request('/adaptation/decisions');
+    expect(readRes.status).toBe(429);
+    expect(readRes.headers.get('Retry-After')).toBeTruthy();
   });
 });

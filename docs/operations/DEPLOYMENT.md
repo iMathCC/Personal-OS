@@ -37,7 +37,7 @@ Preparar publicação reproduzível no Cloudflare Workers (Free, R$ 0), com mesm
 7. Verificação pós-deploy: `/api/v1/health` 200 + headers segurança, `/` SPA, deep link, auth/csrf, sem vazamento de cache API, D1 ok.
 
 ## Verificação pós-deploy
-- `GET /api/v1/health` retorna 200, `status=ok`, `db=ok`, `ready=true`, sem info sensível.
+- `GET /api/v1/health` retorna 200 com `{status:"ok", db:"ok", version, time}` (contrato simples, sem `ready/checks` granulares); sem info sensível. Em degradação, 503 com `status="degraded"` e `db="unavailable"`.
 - Headers: `Cache-Control: no-store` em API, HSTS, CSP, `X-Content-Type-Options: nosniff`.
 - SPA fallback funcional; `/api/*` não cai em HTML.
 - Login/setup apenas com autorização e token seguro; não registrar passkey sem decisão.
