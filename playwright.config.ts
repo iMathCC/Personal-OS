@@ -13,7 +13,7 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    baseURL: 'https://localhost:8788',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'https://localhost:8788',
     ignoreHTTPSErrors: true,
     trace: 'retain-on-failure',
   },

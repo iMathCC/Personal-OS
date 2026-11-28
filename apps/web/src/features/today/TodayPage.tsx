@@ -13,6 +13,7 @@ import {
   safeInternalHref,
 } from './model';
 import { QuickCapture } from './QuickCapture';
+import { OnboardingGuide } from './OnboardingGuide';
 import { currentCycleFrom, useQuickTaskActions, useToday } from './use-today';
 
 interface TodayPageProps {
@@ -121,6 +122,13 @@ export function TodayPage({ timezone }: TodayPageProps) {
           </Link>
         </div>
       </section>
+
+      <OnboardingGuide
+        hasGoals={goals.length > 0}
+        hasProjects={projects.length > 0}
+        hasTasks={(today.tasks.data?.items.length ?? 0) > 0}
+        hasActivity={(today.execution.data?.signals.completedTasksToday ?? 0) > 0}
+      />
 
       {today.strategy.message !== null && (
         <ErrorPanel

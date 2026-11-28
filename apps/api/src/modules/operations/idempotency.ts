@@ -1,5 +1,6 @@
 import type { SQL } from 'drizzle-orm';
 import {
+  assertRowChangedStatement,
   batchSql,
   claimIdempotencyStatement,
   completeIdempotencyStatement,
@@ -38,6 +39,12 @@ export interface IdempotencyRequest {
   rawBody: string;
   /** Instante UTC ISO-8601 com ms, injetado pelo chamador. */
   now: string;
+  /**
+   * Regra de negócio que depende do banco. Só roda quando a requisição NÃO é
+   * replay: um replay válido precisa devolver a resposta original mesmo que o
+   * estado atual tornasse a criação inválida (ex.: título já existente).
+   */
+  validate?: () => Promise<void> | void;
 }
 
 export interface MutationPlan {
@@ -46,6 +53,12 @@ export interface MutationPlan {
   bodyJson: string;
   /** Mutação + auditoria, nesta ordem, dentro do mesmo `db.batch()`. */
   statements: readonly SQL[];
+  /**
+   * Índices (relativos a `statements`) que devem afetar >=1 linha.
+   * Usado para guards otimistas em D1 batch, onde `changes()` entre statements
+   * não é confiável como guard SQL separado.
+   */
+  assertChangedAt?: readonly number[];
 }
 
 export interface MutationContext {
@@ -91,10 +104,11 @@ async function replayFromStore(
 /**
  * Executa uma mutação exatamente uma vez por chave canônica.
  *
- * A reserva permanente é gravada ANTES da mutação; o `claim` na tabela
- * operacional é o guard de concorrência: duas requisições concorrentes
- * produzem um único `db.batch()` vencedor e o perdedor recupera o resultado
- * original de `operation_results` (append-only).
+ * A reserva permanente, o `claim` operacional, a mutação, a auditoria e o
+ * resultado são gravados no MESMO `db.batch()`. Se qualquer statement falhar,
+ * nada é confirmado — inclusive a reserva — e a mesma chave pode ser
+ * repetida com segurança. O `claim` é o guard de concorrência: a segunda
+ * requisição concorrente aborta o lote e recupera o resultado canônico.
  */
 export async function executeIdempotent(
   input: IdempotencyRequest,
@@ -112,27 +126,40 @@ export async function executeIdempotent(
   const opId = newId();
   const expiresAt = new Date(Date.parse(input.now) + IDEMPOTENCY_TTL_MS).toISOString();
 
-  await batchSql(input.db, [
-    reserveIdempotencyStatement({ key, opId, requestHash, createdAt: input.now }),
-  ]);
+  const replayed = await replayFromStore(input.db, key, requestHash);
+  if (replayed !== null) return replayed;
 
+  /**
+   * Reservas sem resultado são estado legado: antes da gravação atômica, uma
+   * falha do lote podia confirmar apenas a reserva. Não há como distinguir
+   * esse caso de uma operação em voo sem novo estado, então a repetição é
+   * recusada em vez de arriscar uma segunda mutação. Reservas novas nunca
+   * ficam órfãs porque são gravadas no mesmo lote do resultado.
+   */
   const reservation = await findReservation(input.db, key);
-  if (reservation === undefined || reservation.operationId !== opId) {
-    if (reservation !== undefined && reservation.requestHash !== requestHash) {
+  if (reservation !== undefined && reservation.operationId !== opId) {
+    if (reservation.requestHash !== requestHash) {
       throw conflict('Chave idempotente já usada com conteúdo diferente.');
     }
-    const replayed = await replayFromStore(input.db, key, requestHash);
-    if (replayed !== null) return replayed;
     throw conflict('Operação idempotente em andamento; tente novamente.');
   }
+
+  await input.validate?.();
 
   const mutation = plan({ opId, now: input.now });
   // Limite verificado ANTES de qualquer mutação de domínio.
   assertResultSize(mutation.bodyJson);
   const { mirror } = mirrorFor(mutation.bodyJson);
 
+  const guardedStatements = [...mutation.statements];
+  const assertIndices = [...(mutation.assertChangedAt ?? [])].sort((a, b) => b - a);
+  for (const index of assertIndices) {
+    guardedStatements.splice(index + 1, 0, assertRowChangedStatement());
+  }
+
   try {
     await batchSql(input.db, [
+      reserveIdempotencyStatement({ key, opId, requestHash, createdAt: input.now }),
       claimIdempotencyStatement({
         key,
         method: input.method.toUpperCase(),
@@ -143,7 +170,7 @@ export async function executeIdempotent(
         expiresAt,
         createdAt: input.now,
       }),
-      ...mutation.statements,
+      ...guardedStatements,
       insertOperationResultStatement({
         key,
         opId,
@@ -164,6 +191,22 @@ export async function executeIdempotent(
     // gravou o resultado canônico, que deve ser devolvido ao chamador.
     const replayed = await replayFromStore(input.db, key, requestHash);
     if (replayed !== null) return replayed;
+    // Colisão de índice único entre requisições concorrentes é erro de
+    // negócio, não falha interna (a validação sequencial já devolve 409).
+    if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) {
+      throw conflict('Recurso já existe.');
+    }
+    // Guard otimista: UPDATE crítico não afetou a linha esperada.
+    if (error instanceof Error && /VERSION_CONFLICT/i.test(error.message)) {
+      throw conflict('Versão divergente ou recurso já modificado; recarregue e tente novamente.');
+    }
+    // Guard atômico em D1 batch (CHECK violation por changes()=0).
+    if (
+      error instanceof Error &&
+      /rate_limits_count_non_negative|__version_conflict__/i.test(error.message)
+    ) {
+      throw conflict('Versão divergente ou recurso já modificado; recarregue e tente novamente.');
+    }
     throw error;
   }
 

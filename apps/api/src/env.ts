@@ -2,8 +2,8 @@ import type { createDb, SessionRow } from '@personal-os/db';
 
 export interface Env {
   DB: D1Database;
-  // Disponível apenas em wrangler.local.toml; usado por testes com banco descartável.
-  DB_TEST: D1Database;
+  // Disponível apenas em wrangler.local.toml; ausente em produção.
+  DB_TEST?: D1Database;
   APP_VERSION: string;
   /** Segredo do bootstrap; configurado via `wrangler secret put SETUP_TOKEN`. */
   SETUP_TOKEN: string;
@@ -28,10 +28,15 @@ export type AppEnv = {
     userAgent: string | null;
     setVidCookie: boolean;
     session: SessionRow | null;
+    /** Fuso da conta autenticada; usado para `local_date` e filtros de período. */
+    userTimezone: string;
     sessionToken: string | null;
     sessionTokenHash: string | null;
     posVid: string;
-    ipHash: string;
+    /** NULL quando não há origem confiável; nunca string vazia. */
+    ipHash: string | null;
+    /** Origem usada pelo limitador; `unavailable` falha fechado. */
+    originKind: 'trusted-ip' | 'local-test' | 'unavailable';
     csrfToken: string | null;
     authFailure: boolean;
     /** Código estável do erro, usado apenas em logs estruturados. */

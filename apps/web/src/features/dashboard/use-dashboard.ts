@@ -1,6 +1,11 @@
-import type { HealthResponse, StudySessionDto } from '@personal-os/shared';
+import type {
+  DecisionDashboardDto,
+  GoalDashboardData,
+  HealthResponse,
+  StudySessionDto,
+} from '@personal-os/shared';
 import { useCallback, useEffect, useState } from 'react';
-import { fetchHealth, studiesApi } from '@/lib/api';
+import { decisionApi, fetchHealth, goalsApi, studiesApi } from '@/lib/api';
 import { localDateIn, shiftLocalDate } from '@/features/studies/time';
 
 export interface StudiesSnapshot {
@@ -12,7 +17,13 @@ export interface StudiesSnapshot {
 
 export type DashboardState =
   | { status: 'loading' }
-  | { status: 'ready'; health: HealthResponse; studies: StudiesSnapshot }
+  | {
+      status: 'ready';
+      health: HealthResponse;
+      studies: StudiesSnapshot;
+      goals: GoalDashboardData | null;
+      life: DecisionDashboardDto | null;
+    }
   | { status: 'error'; message: string };
 
 export interface DashboardController {
@@ -32,16 +43,29 @@ export function useDashboard(timezone: string): DashboardController {
     setState({ status: 'loading' });
     const today = localDateIn(timezone, new Date());
     const from = shiftLocalDate(today, -29);
+    // Falha de módulos não centrais não derruba a visão geral.
+    const goalsRequest = goalsApi.dashboard(controller.signal).then(
+      (data) => data,
+      () => null,
+    );
+    const lifeRequest = decisionApi.lifeDashboard({}, controller.signal).then(
+      (data) => data,
+      () => null,
+    );
     void Promise.all([
       fetchHealth(controller.signal),
-      studiesApi.dashboard(from, today, controller.signal),
+      studiesApi.dashboard(from, today, undefined, controller.signal),
       studiesApi.sessions(controller.signal),
+      goalsRequest,
+      lifeRequest,
     ])
-      .then(([health, dashboard, sessions]) => {
+      .then(([health, dashboard, sessions, goals, life]) => {
         if (controller.signal.aborted) return;
         setState({
           status: 'ready',
           health,
+          goals,
+          life,
           studies: {
             totalMinutes: dashboard.summary.totalMinutes,
             sessionCount: dashboard.summary.sessionCount,

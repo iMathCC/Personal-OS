@@ -256,6 +256,17 @@ describe('replay e limites', () => {
     expect(Number(response.headers.get('Retry-After'))).toBeGreaterThan(0);
   });
 
+  it('mantém o limite de login/options sob requisições concorrentes', async () => {
+    const client = await newClient();
+    const responses = await Promise.all(
+      Array.from({ length: 31 }, () =>
+        client.request('/auth/login/options', { method: 'POST', json: {} }),
+      ),
+    );
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(30);
+    expect(responses.filter((response) => response.status === 429)).toHaveLength(1);
+  });
+
   it('bloqueia recovery/verify após 5 falhas', async () => {
     const client = await newClient();
     for (let index = 0; index < 5; index += 1) {
@@ -269,6 +280,20 @@ describe('replay e limites', () => {
       json: { code: '00000000-0000-0000-0000-000000000001' },
     });
     expect(response.status).toBe(429);
+  });
+
+  it('não deixa falhas concorrentes zerarem o contador da janela', async () => {
+    const client = await newClient();
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () =>
+        client.request('/auth/recovery/verify', {
+          method: 'POST',
+          json: { code: '00000000-0000-0000-0000-000000000000' },
+        }),
+      ),
+    );
+    expect(responses.filter((response) => response.status === 401)).toHaveLength(5);
+    expect(responses.filter((response) => response.status === 429)).toHaveLength(1);
   });
 
   it('recusa corpo acima de 16 KB', async () => {

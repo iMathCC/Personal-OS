@@ -48,10 +48,39 @@ export async function hashWithSalt(value: string | null, salt: string): Promise<
   return value === null || value.length === 0 ? null : sha256Hex(`${salt}:${value}`);
 }
 
-export function trustedClientIp(headers: Headers): string | null {
-  // Apenas o cabeçalho injetado pelo runtime Cloudflare é confiável.
-  return headers.get('CF-Connecting-IP');
+function isIpv4(value: string): boolean {
+  const parts = value.split('.');
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)
+  );
 }
+
+function isIpv6(value: string): boolean {
+  if (value.includes('%')) return false;
+  if (!/^[0-9A-Fa-f:.]+$/.test(value)) return false;
+  try {
+    const parsed = new URL(`http://[${value}]/`);
+    return parsed.hostname.toLowerCase() === `[${value.toLowerCase()}]`;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Somente o cabeçalho injetado pelo runtime Cloudflare é confiável. Valores
+ * arbitrários (`X-Forwarded-For`, `Forwarded`, `X-Real-IP`) são ignorados,
+ * assim como valores vazios ou que não sejam um literal IP válido.
+ */
+export function trustedClientIp(headers: Headers): string | null {
+  const value = headers.get('CF-Connecting-IP');
+  if (value === null || value.length === 0 || value.length > 45 || value.trim() !== value) {
+    return null;
+  }
+  return isIpv4(value) || isIpv6(value) ? value : null;
+}
+
+export type RequestOriginKind = 'trusted-ip' | 'local-test' | 'unavailable';
 
 export function allowedOrigins(env: Env): string[] {
   return env.ORIGIN.split(',')

@@ -11,7 +11,6 @@ import {
 import { Hono } from 'hono';
 import type { AppEnv } from '../../env';
 import { authRequired } from '../../middleware/csrf';
-import { rateLimit } from '../../middleware/rate-limit';
 import { jsonOk, parseBody } from './http';
 import { clearSessionCookie, constantTimeEqual, csrfCookie, sessionCookie } from './security';
 import { AuthService, type RequestContext } from './service';
@@ -58,13 +57,13 @@ authRoutes.get('/csrf', async (c) => {
   return jsonOk(c, result);
 });
 
-authRoutes.post('/setup/options', rateLimit('setup', 'ip'), async (c) => {
+authRoutes.post('/setup/options', async (c) => {
   requireSetupToken(c);
   parseBody(c, setupOptionsRequestSchema);
   return jsonOk(c, await service(c).setupOptions());
 });
 
-authRoutes.post('/setup/verify', rateLimit('setup', 'ip'), async (c) => {
+authRoutes.post('/setup/verify', async (c) => {
   requireSetupToken(c);
   const input = parseBody(c, setupVerifyRequestSchema);
   const result = await service(c).setupVerify(input);
@@ -80,67 +79,62 @@ authRoutes.post('/setup/verify', rateLimit('setup', 'ip'), async (c) => {
   );
 });
 
-authRoutes.post('/login/options', rateLimit('loginOptions', 'ip'), async (c) => {
+authRoutes.post('/login/options', async (c) => {
   parseBody(c, loginOptionsRequestSchema);
   return jsonOk(c, await service(c).loginOptions());
 });
 
-authRoutes.post('/login/verify', rateLimit('loginVerify', 'ip'), async (c) => {
+authRoutes.post('/login/verify', async (c) => {
   const input = parseBody(c, loginVerifyRequestSchema);
   const result = await service(c).loginVerify(input);
   applyAuthCookies(c, result.sessionToken, result.csrfToken);
   return jsonOk(c, { user: result.user, session: result.session });
 });
 
-authRoutes.post('/logout', authRequired, rateLimit('authenticatedWrite', 'user'), async (c) => {
+authRoutes.post('/logout', authRequired, async (c) => {
   await service(c).logout();
   c.header('Set-Cookie', clearSessionCookie(), { append: true });
   return jsonOk(c, { loggedOut: true });
 });
 
-authRoutes.post('/logout-all', authRequired, rateLimit('authenticatedWrite', 'user'), async (c) => {
+authRoutes.post('/logout-all', authRequired, async (c) => {
   await service(c).logoutAll();
   c.header('Set-Cookie', clearSessionCookie(), { append: true });
   return jsonOk(c, { loggedOut: true });
 });
 
-authRoutes.post('/recovery/verify', rateLimit('recoveryVerify', 'ip'), async (c) => {
+authRoutes.post('/recovery/verify', async (c) => {
   const input = parseBody(c, recoveryVerifyRequestSchema);
   return jsonOk(c, await service(c).recoveryVerify(input));
 });
 
-authRoutes.post('/recovery/register/options', rateLimit('recoveryRegister', 'ip'), async (c) => {
+authRoutes.post('/recovery/register/options', async (c) => {
   const input = parseBody(c, recoveryRegisterOptionsRequestSchema);
   return jsonOk(c, await service(c).recoveryRegisterOptions(input));
 });
 
-authRoutes.post('/recovery/register/verify', rateLimit('recoveryRegister', 'ip'), async (c) => {
+authRoutes.post('/recovery/register/verify', async (c) => {
   const input = parseBody(c, recoveryRegisterVerifyRequestSchema);
   return jsonOk(c, await service(c).recoveryRegisterVerify(input));
 });
 
-authRoutes.get('/me', authRequired, rateLimit('authenticatedRead', 'user'), async (c) => {
+authRoutes.get('/me', authRequired, async (c) => {
   const result = await service(c).me();
   await service(c).touchSession();
   return jsonOk(c, result);
 });
 
-authRoutes.get('/sessions', authRequired, rateLimit('authenticatedRead', 'user'), async (c) => {
+authRoutes.get('/sessions', authRequired, async (c) => {
   const result = await service(c).sessions();
   await service(c).touchSession();
   return jsonOk(c, result);
 });
 
-authRoutes.delete(
-  '/sessions/:id',
-  authRequired,
-  rateLimit('authenticatedWrite', 'user'),
-  async (c) => {
-    const id = c.req.param('id');
-    if (!/^[A-Za-z0-9_-]{8,128}$/.test(id)) {
-      throw forbidden('Identificador de sessão inválido.');
-    }
-    await service(c).revokeSession(id);
-    return jsonOk(c, { revoked: true });
-  },
-);
+authRoutes.delete('/sessions/:id', authRequired, async (c) => {
+  const id = c.req.param('id');
+  if (!/^[A-Za-z0-9_-]{8,128}$/.test(id)) {
+    throw forbidden('Identificador de sessão inválido.');
+  }
+  await service(c).revokeSession(id);
+  return jsonOk(c, { revoked: true });
+});

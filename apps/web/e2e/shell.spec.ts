@@ -18,7 +18,18 @@ async function activateServiceWorker(page: Page): Promise<void> {
 }
 
 test('deep links e fallback SPA servem a aplicação', async ({ page }) => {
-  for (const path of ['/estudos', '/configuracoes', '/rota-inexistente']) {
+  for (const path of [
+    '/hoje',
+    '/revisao-diaria',
+    '/estudos',
+    '/desempenho',
+    '/desempenho/domínios',
+    '/desempenho/execução',
+    '/desempenho/padrões',
+    '/desempenho/revisões',
+    '/configuracoes',
+    '/rota-inexistente',
+  ]) {
     const response = await page.goto(path);
     expect(response?.status()).toBe(200);
     await expect(page.getByRole('heading', { name: 'Bem-vindo de volta' })).toBeVisible();
@@ -31,12 +42,18 @@ test('headers de segurança e no-store', async ({ page }) => {
   expect(html.headers()['cache-control']).toContain('no-store');
   expect(html.headers()['x-content-type-options']).toBe('nosniff');
   expect(html.headers()['referrer-policy']).toBe('no-referrer');
-  expect(html.headers()['content-security-policy']).toContain("default-src 'self'");
+  const staticCsp = html.headers()['content-security-policy'] ?? '';
+  expect(staticCsp).toContain("default-src 'self'");
+  expect(staticCsp).toContain("manifest-src 'self'");
+  expect(staticCsp).toContain("worker-src 'self'");
+  expect(staticCsp).toContain('upgrade-insecure-requests');
 
   const api = await page.request.get('/api/v1/health');
   expect(api.status()).toBe(200);
   expect(api.headers()['cache-control']).toContain('no-store');
   expect(api.headers()['x-request-id']).toMatch(/^req_/);
+  expect(api.headers()['content-security-policy']).toContain("default-src 'none'");
+  expect(api.headers()['content-security-policy']).toContain("frame-ancestors 'none'");
 });
 
 test('manifest e ícones da PWA', async ({ page }) => {

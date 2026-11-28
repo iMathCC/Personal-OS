@@ -14,6 +14,8 @@ export const STUDY_MINUTES_ALGORITHM = 'study-minutes-v1';
 export const STUDY_MINUTES_METRIC_KEY = 'study_minutes';
 /** Fonte da observação derivada; nunca `src_manual` para dado gerado pelo sistema. */
 export const STUDY_MINUTES_SOURCE_ID = 'src_calculation';
+/** Versão do cálculo de progresso de metas por minutos acumulados. */
+export const GOAL_PROGRESS_ALGORITHM = 'goal-minutes-progress-v1';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -123,6 +125,9 @@ export function assertDateRange(range: DateRange, maxDays = MAX_SERIES_DAYS): Da
   const from = assertLocalDate(range.from, 'from');
   const to = assertLocalDate(range.to, 'to');
   const days = dayCount(from, to);
+  if (days === 0) {
+    throw validationError('A data inicial não pode ser posterior à data final.');
+  }
   if (days > maxDays) {
     throw businessRule(`Intervalo excede o limite de ${maxDays} dias.`);
   }
@@ -140,6 +145,13 @@ export function dayCount(from: string, to: string): number {
 
 function dateFromDayNumber(day: number): string {
   return new Date(day * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Desloca uma data local por dias inteiros, sem usar o fuso do servidor. */
+export function shiftLocalDate(localDate: string, days: number): string {
+  assertLocalDate(localDate);
+  if (!Number.isInteger(days)) throw validationError('Deslocamento de data inválido.');
+  return dateFromDayNumber(dayNumber(localDate) + days);
 }
 
 /** Segunda-feira da semana ISO da data informada. */
@@ -240,6 +252,181 @@ export function summarizeStudyMinutes(samples: readonly ObservationSample[]): St
   };
 }
 
+export interface CourseMinutesRow {
+  courseId: string | null;
+  minutes: number;
+  sessionCount: number;
+}
+
+export type CourseMinutes = CourseMinutesRow;
+
+/**
+ * Agrupa minutos já filtrados por período. A soma usa apenas observações ativas
+ * devolvidas pela consulta; cursos sem observação não aparecem (não é zero).
+ */
+export function buildCourseBreakdown(rows: readonly CourseMinutesRow[]): CourseMinutes[] {
+  const grouped = new Map<string | null, CourseMinutes>();
+  for (const row of rows) {
+    if (!Number.isFinite(row.minutes) || row.minutes < 0) {
+      throw businessRule('Minutos por curso inválidos.');
+    }
+    if (!Number.isInteger(row.sessionCount) || row.sessionCount < 0) {
+      throw businessRule('Contagem de sessões por curso inválida.');
+    }
+    const current = grouped.get(row.courseId) ?? {
+      courseId: row.courseId,
+      minutes: 0,
+      sessionCount: 0,
+    };
+    current.minutes += row.minutes;
+    current.sessionCount += row.sessionCount;
+    grouped.set(row.courseId, current);
+  }
+  return [...grouped.values()].sort(
+    (a, b) => b.minutes - a.minutes || (a.courseId ?? '').localeCompare(b.courseId ?? ''),
+  );
+}
+
+export interface MetricDelta {
+  current: number;
+  previous: number;
+  difference: number;
+  /** `null` quando a base é zero: variação percentual não é definida. */
+  changePercent: number | null;
+}
+
+export interface StudyPeriodComparison {
+  current: StudySummary;
+  previous: StudySummary;
+  totalMinutes: MetricDelta;
+  sessionCount: MetricDelta;
+  daysStudied: MetricDelta;
+}
+
+function metricDelta(current: number, previous: number): MetricDelta {
+  return {
+    current,
+    previous,
+    difference: current - previous,
+    changePercent: previous === 0 ? null : ((current - previous) / previous) * 100,
+  };
+}
+
+/** Compara dois resumos já calculados; não inventa base quando o período anterior está vazio. */
+export function compareStudyPeriods(
+  current: StudySummary,
+  previous: StudySummary,
+): StudyPeriodComparison {
+  return {
+    current,
+    previous,
+    totalMinutes: metricDelta(current.totalMinutes, previous.totalMinutes),
+    sessionCount: metricDelta(current.sessionCount, previous.sessionCount),
+    daysStudied: metricDelta(current.daysStudied, previous.daysStudied),
+  };
+}
+
+export type GoalProgressMode = 'manual' | 'metrics' | 'tasks' | 'hybrid';
+export type GoalMetricDirection = 'increase' | 'decrease' | 'maintain';
+
+export interface GoalMetricProgressInput {
+  baselineValue: number | null;
+  targetValue: number;
+  direction: GoalMetricDirection;
+  currentValue: number | null;
+  weight?: number | null;
+}
+
+export interface GoalProgressInput {
+  progressMode: GoalProgressMode;
+  manualProgress: number | null;
+  metrics: readonly GoalMetricProgressInput[];
+  status: 'draft' | 'active' | 'paused' | 'achieved' | 'cancelled';
+}
+
+export interface GoalProgress {
+  percent: number | null;
+  basis: 'manual' | 'metrics' | 'status' | 'unavailable';
+  algorithmVersion: string | null;
+  achieved: boolean;
+}
+
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, Math.round(value * 10) / 10));
+}
+
+function metricRatio(metric: GoalMetricProgressInput): number | null {
+  const { baselineValue, targetValue, currentValue, direction } = metric;
+  if (
+    currentValue === null ||
+    baselineValue === null ||
+    !Number.isFinite(currentValue) ||
+    !Number.isFinite(baselineValue) ||
+    !Number.isFinite(targetValue)
+  ) {
+    return null;
+  }
+  if (direction === 'maintain') return null;
+  const denominator =
+    direction === 'increase' ? targetValue - baselineValue : baselineValue - targetValue;
+  if (denominator <= 0) return null;
+  const numerator =
+    direction === 'increase' ? currentValue - baselineValue : baselineValue - currentValue;
+  return clampPercent((numerator / denominator) * 100);
+}
+
+/**
+ * Progresso de meta a partir de manual ou de razão entre valor atual, baseline e
+ * meta. `null` significa "sem dados suficientes", nunca zero.
+ */
+export function calculateGoalProgress(input: GoalProgressInput): GoalProgress {
+  if (input.status === 'achieved') {
+    return { percent: 100, basis: 'status', algorithmVersion: null, achieved: true };
+  }
+  if (input.status === 'cancelled') {
+    return { percent: null, basis: 'unavailable', algorithmVersion: null, achieved: false };
+  }
+
+  if (input.manualProgress !== null && !Number.isFinite(input.manualProgress)) {
+    throw businessRule('Progresso manual inválido.');
+  }
+
+  const ratios: { value: number; weight: number }[] = [];
+  for (const metric of input.metrics) {
+    const value = metricRatio(metric);
+    const weight = metric.weight ?? 1;
+    if (value === null || !Number.isFinite(weight) || weight <= 0) continue;
+    ratios.push({ value, weight });
+  }
+
+  if ((input.progressMode === 'metrics' || input.progressMode === 'hybrid') && ratios.length > 0) {
+    const totalWeight = ratios.reduce((sum, ratio) => sum + ratio.weight, 0);
+    const weighted =
+      ratios.reduce((sum, ratio) => sum + ratio.value * ratio.weight, 0) / totalWeight;
+    const percent = clampPercent(weighted);
+    return {
+      percent,
+      basis: 'metrics',
+      algorithmVersion: GOAL_PROGRESS_ALGORITHM,
+      achieved: percent >= 100,
+    };
+  }
+
+  if (input.progressMode === 'manual' || input.progressMode === 'hybrid') {
+    if (input.manualProgress !== null) {
+      const percent = clampPercent(input.manualProgress);
+      return {
+        percent,
+        basis: 'manual',
+        algorithmVersion: null,
+        achieved: percent >= 100,
+      };
+    }
+  }
+
+  return { percent: null, basis: 'unavailable', algorithmVersion: null, achieved: false };
+}
+
 /** Cursor opaco de paginação: base64url de `[sortValue, id]`. */
 export function encodeCursor(value: string): string {
   const bytes = new TextEncoder().encode(value);
@@ -253,9 +440,16 @@ export function decodeCursor(cursor: string): string {
     throw validationError('Cursor inválido.');
   }
   const padded = cursor.replace(/-/g, '+').replace(/_/g, '/');
-  const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  const value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+  let value: string;
+  try {
+    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+  } catch {
+    // `atob` e o TextDecoder fatal lançam erros nativos; a API precisa de um
+    // erro de domínio para responder 400 em vez de 500.
+    throw validationError('Cursor inválido.');
+  }
   const parts = value.split('\u0000');
   if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
     throw validationError('Cursor inválido.');

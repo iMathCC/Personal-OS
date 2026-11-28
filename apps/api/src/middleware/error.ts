@@ -4,7 +4,11 @@ import type { ErrorHandler } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { AppEnv } from '../env';
-import { securityLogFields } from './observability';
+import {
+  dataStoreFailureFields,
+  securityLogFields,
+  type DataStoreFailureCategory,
+} from './observability';
 
 const CODE_BY_STATUS: Record<number, ErrorCode> = {
   400: 'VALIDATION_ERROR',
@@ -22,6 +26,43 @@ const CODE_BY_STATUS: Record<number, ErrorCode> = {
 
 function httpStatusIsAuthFailure(status: number): boolean {
   return status === 401 || status === 403;
+}
+
+function safeErrorName(err: unknown): string {
+  const name = err instanceof Error ? err.name : 'UnknownError';
+  return /^[A-Z][A-Z0-9_]{1,39}$/.test(name) ? name : 'UnknownError';
+}
+
+/**
+ * Classifica falhas do D1 sem jamais registrar a mensagem original: o texto
+ * pode conter SQL com valores sensíveis. Apenas a categoria orienta o cliente
+ * e o diagnóstico interno.
+ */
+export function classifyDataStoreFailure(err: unknown): DataStoreFailureCategory | null {
+  if (!(err instanceof Error)) return null;
+  const names: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; depth < 3 && typeof current === 'object' && current !== null; depth += 1) {
+    const name = (current as { name?: unknown }).name;
+    if (typeof name === 'string') names.push(name);
+    current = (current as { cause?: unknown }).cause;
+  }
+  const text = `${names.join(' ')} ${err.message}`;
+  if (
+    /SQLITE_CONSTRAINT|UNIQUE constraint failed|FOREIGN KEY constraint failed|NOT NULL constraint failed|CHECK constraint failed/i.test(
+      text,
+    )
+  ) {
+    return 'constraint';
+  }
+  if (
+    /D1_ERROR|D1_EXEC_ERROR|D1_CREATE_STATEMENT_ERROR|D1_BINDING_ERROR|SQLITE_BUSY|SQLITE_LOCKED|database is locked|database is busy|timeout|timed out|interrupted|fetch failed|unavailable/i.test(
+      text,
+    )
+  ) {
+    return 'unavailable';
+  }
+  return /D1|SQLITE|DATABASE/i.test(names.join(' ')) ? 'execution' : null;
 }
 
 const STATUS_BY_DOMAIN_CODE: Record<DomainError['code'], ContentfulStatusCode> = {
@@ -98,6 +139,39 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
     return c.json({ error: { code, message: err.message, requestId } }, status);
   }
 
+  const dataStoreCategory = classifyDataStoreFailure(err);
+  if (dataStoreCategory !== null) {
+    const dataStoreCode: ErrorCode =
+      dataStoreCategory === 'constraint' ? 'CONFLICT' : 'DEPENDENCY_UNAVAILABLE';
+    const dataStoreStatus = dataStoreCategory === 'constraint' ? 409 : 503;
+    c.set('errorCode', dataStoreCode);
+    console.error(
+      JSON.stringify(
+        dataStoreFailureFields({
+          requestId,
+          path: c.req.path,
+          status: dataStoreStatus,
+          code: dataStoreCode,
+          category: dataStoreCategory,
+          errorName: safeErrorName(err),
+        }),
+      ),
+    );
+    return c.json(
+      {
+        error: {
+          code: dataStoreCode,
+          message:
+            dataStoreCategory === 'constraint'
+              ? 'Conflito de dados.'
+              : 'Serviço temporariamente indisponível.',
+          requestId,
+        },
+      },
+      dataStoreStatus,
+    );
+  }
+
   // Nunca expor stack trace, SQL ou dados do usuário. Apenas o tipo do erro
   // para correlação com os logs estruturados do provedor.
   console.error(
@@ -105,7 +179,7 @@ export const errorHandler: ErrorHandler<AppEnv> = (err, c) => {
       level: 'error',
       message: 'unhandled_error',
       requestId,
-      errorName: err instanceof Error ? err.name : 'UnknownError',
+      errorName: safeErrorName(err),
     }),
   );
 

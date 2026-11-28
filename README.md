@@ -2,7 +2,7 @@
 
 Sistema pessoal de gestão e inteligência orientado por dados: objetivos, projetos, atividades, métricas, finanças, estudos, carreira, leituras, treino e bem-estar em um único lugar.
 
-> **Status: Fase 1 — Tarefa 1.2.** Entregas 1 a 3 publicadas e em revisão; **Entrega 4 (App Shell e dashboard) implementada localmente, sem push**. Spike WebAuthn aprovado, persistência D1 com migrações e seeds, autenticação por passkey com sessões e, agora, App Shell com dashboard inicial. **Ainda não há módulos de negócio**: áreas sem implementação aparecem como planejadas, e o dashboard só usa dados reais de `/auth/me`, `/auth/sessions` e `/health`. Não use com dados reais.
+> **Status: Fase 1 — Tarefa 1.2.** Entregas 1 a 6 e 12 a 18 revisadas localmente; a Entrega 19 preparou a publicação integrada com runbook, migrations auditadas e drill de backup/restore. Versão publicada em produção corresponde à Entrega 10 (sem os recursos abaixo), com estado remoto não verificado nesta entrega. Há autenticação por passkey, App Shell, persistência D1 e vertical slices de **Estudos**, **Objetivos**, **Projetos/Tarefas**, **Inteligência/Revisão semanal**, **Estratégia/Planejamento**, **Dados pessoais/Integração** e **Inteligência/Decisão**. As mudanças das Entregas 12 a 18 estão **locais, sem commit, push ou deploy**. Não use com dados reais sem autorização explícita.
 
 ## Requisitos
 
@@ -37,14 +37,14 @@ apps/
   api/        Worker Hono + D1 binding + testes Vitest
   web/        SPA React + Vite + Tailwind v4 + shadcn/ui + PWA
     src/app/        App, AuthScreen, AppShell e rotas
-    src/features/   auth, dashboard, planned, settings
+    src/features/   auth, dashboard, estudos, goals, planejamento, life, planned, settings
     src/components/ UI compartilhada (botão, ícones, estados)
     src/lib/        cliente API tipado e modelo de navegação
     test/           testes de navegação, estados, status e formatação
 packages/
   db/         Schema Drizzle, cliente D1, helper UUIDv7, seeds e config do Drizzle Kit
-  domain/     Regras puras de sessão, contadores, rate limit e segurança
-  shared/     Contratos Zod compartilhados (health, auth, erros)
+  domain/     Regras puras de sessão, estudos, execução, inteligência, planejamento, life e segurança
+  shared/     Contratos Zod compartilhados (health, auth, domínios e erros)
 docs/         Especificação, arquitetura, roadmap, ADRs, spike e operações
 ```
 
@@ -105,10 +105,17 @@ O schema Drizzle vive em `packages/db/src/schema` e é a fonte de verdade para `
 | `0000_init.sql` | 12 tabelas (`app_settings`, `users`, `sources`, `areas`, `passkeys`, `sessions`, `recovery_codes`, `recovery_tokens`, `auth_challenges`, `rate_limits`, `idempotency_keys`, `audit_log`), FKs, índices e checks |
 | `0001_audit_append_only.sql` | Triggers de auditoria append-only e limite de 10 sessões ativas |
 | `0002_audit_no_replace.sql` | Bloqueio de `INSERT OR REPLACE` em `audit_log` (o D1 não dispara o trigger de DELETE nesse caso) |
+| `0003_core_studies.sql` | Modelo central, Estudos, relações tipadas e reserva/resultado idempotente (Entrega 5) |
+| `0004_goals_milestones.sql` | Objetivos e marcos (Entrega 13) |
+| `0005_execution_layer.sql` | Projetos, tarefas, dependências e marcos de projeto (Entrega 14) |
+| `0006_weekly_reviews.sql` | Revisões semanais com snapshot congelado (Entrega 15) |
+| `0007_strategic_planning.sql` | Nove tabelas aditivas de estratégia e planejamento (Entrega 16) |
+| `0008_life_data.sql` | Doze tabelas aditivas de dados pessoais e importação (Entrega 17) |
+| `0009_decision_alert_states.sql` | Estado de alertas de decisão: acknowledge/dismiss versionado (Entrega 18) |
 
 ```bash
 cp apps/api/wrangler.local.example.toml apps/api/wrangler.local.toml  # uma vez, se ainda não existir
-npm run db:migrate:local   # aplica 0000 → 0001 → 0002 no binding DB
+npm run db:migrate:local   # aplica 0000 → 0009 no binding DB
 npm run db:seed:local      # 4 fontes de sistema + 8 áreas; idempotente
 npm run db:seed:local      # repetir não duplica nada
 ```
@@ -131,23 +138,26 @@ npm run build
 npm audit --audit-level=high
 ```
 
-O CI em `.github/workflows/ci.yml` roda a sequência principal com Node 24 e `npm ci`, além de `npm audit --audit-level=high`. A suíte completa da API (`npm test`) inclui testes de integração de banco; `npm run test:integration` é o atalho para executá-los isoladamente. Os testes unitários cobrem domínio (34), frontend (32) e API (81). Os testes de navegador usam Playwright local (Chromium + Firefox): `npm run test:e2e:env -- --reset`, iniciar o Worker em 8788 conforme instrução do script e `npm run test:e2e`. O fluxo de passkey real é automatizado no Chromium com autenticador virtual via CDP; no Firefox ele é explicitamente ignorado por limitação de automação. Detalhes em [ADR-0014](docs/decisions/0014-playwright-e2e.md).
+O CI em `.github/workflows/ci.yml` roda a sequência principal com Node 24 e `npm ci`, além de `npm audit --audit-level=high`. A suíte completa (`npm test`) inclui testes de integração de banco; `npm run test:integration` é o atalho para executá-los isoladamente. A validação da Entrega 18 cobre domínio (131), shared (27), web (84) e API (177) — **419 testes** —, incluindo **45/45** testes de integração de banco. Os testes de navegador usam Playwright local (Chromium + Firefox): `npm run test:e2e:env -- --reset`, iniciar o Worker em 8788 conforme instrução do script e `npm run test:e2e`. O fluxo de passkey real é automatizado no Chromium com autenticador virtual via CDP; no Firefox ele é explicitamente ignorado por limitação de automação. Detalhes em [ADR-0014](docs/decisions/0014-playwright-e2e.md).
 
-### App Shell e dashboard (Entrega 4)
+### App Shell e dashboard (evoluído nas Entregas 12 a 18)
 
-A navegação tem dez áreas em três grupos (`Núcleo`, `Áreas da vida`, `Sistema`). Somente **Visão geral** e **Configurações** estão disponíveis; as demais rotas renderizam páginas que explicam o estado "Em preparação" ou "Não configurada", sem formulários ou indicadores simulados.
+A navegação mantém três grupos (`Núcleo`, `Áreas da vida`, `Sistema`). Além de Visão geral e Configurações, estão disponíveis Estudos, Objetivos, Projetos, Tarefas, Execução, Inteligência, Revisão semanal, Estratégia, Planejamento, Ciclos, Capacidade, Cenários, Finanças, Saúde, Treinamento, Leitura (`/conhecimento` é alias), Tempo, Importações e Integração e, desde a Entrega 18, Vida, Alertas de decisão, Decisões e Revisões. Carreira segue em preparação, sem formulários ou indicadores simulados.
 
-O dashboard usa apenas dados já existentes na API:
+A camada de decisão reúne estratégia, execução, planejamento, dados pessoais, inteligência e revisão em `/inteligencia/vida`, `/inteligencia/alertas`, `/inteligencia/decisoes` e `/inteligencia/revisoes`. Alertas, recomendações e próximas ações são derivações determinísticas com fontes, cálculo, confiança, limitações e o que não se pode concluir; ausência de evidência aparece como `insufficient_data`, nunca como zero, e nenhuma relação entre domínios afirma causalidade. Somente reconhecer/dispensar alerta grava estado, com versão otimista e auditoria atômica ([ADR-0021](docs/decisions/0021-motor-de-decisao-e-painel-de-vida.md)).
+
+O dashboard consome apenas dados reais da API:
 
 - `GET /auth/me` — nome, fuso horário, preferências e contagens;
-- `GET /health` — estado real da API/banco, exibido em "Atenção e prioridades";
+- `GET /health` — estado real da API/banco;
+- `GET /studies/dashboard` e `GET /goals/dashboard` — sinais reais de Estudos e Objetivos, com fallback degradável;
 - `GET /auth/sessions` — apenas na tela de Configurações.
 
-Cards de áreas, Objetivos, Atividade recente e Atenção mostram estados vazios explicativos quando não há fonte de dados. Nenhum endpoint novo, schema, migration ou dado fictício foi introduzido. O roteador é `react-router` (já previsto no ADR-0001); o cliente de API continua único em `apps/web/src/lib/api.ts`.
+Os módulos de dados pessoais têm páginas próprias e não injetam valores fictícios no dashboard. Cards de áreas, Objetivos, Atividade recente e Atenção mostram estados vazios explicativos quando não há fonte de dados. O roteador é `react-router` (já previsto no ADR-0001); o cliente de API continua único em `apps/web/src/lib/api.ts`.
 
 ### Medições locais
 
-Medições mais recentes (21/11/2026, Entrega 6): HTTP p50 39 ms / p95 113 ms, spans D1 p95 23 ms, no máximo 8 spans D1 por requisição e bundle inicial de **129,86 kB gzip**. Método, limitações e resultados completos em [docs/operations/local-measurements.md](docs/operations/local-measurements.md).
+Medições locais (21/11/2026, Entrega 6): HTTP p50 39 ms / p95 113 ms, spans D1 p95 23 ms, no máximo 8 spans D1 por requisição. Na Entrega 18, o bundle inicial mede **715,49 kB bruto / 187,98 kB gzip** e o chunk lazy do ECharts 516,24 kB / 174,78 kB gzip; o Worker no dry-run ficou em 2624,64 KiB / 459,27 KiB gzip (ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)). CPU p95 em produção segue sem amostra suficiente. Método e limitações em [docs/operations/local-measurements.md](docs/operations/local-measurements.md).
 
 Medição histórica da Tarefa 1.1 (20/11/2026): p50 11,4 ms, p95 15,7 ms, máximo 18,8 ms em 50 requisições ao health check, com 104,29 KB gzip de bundle. O tempo é latência de ponta a ponta no runtime local (inclui overhead do Miniflare), não CPU isolada. CPU p95 por rota só é observável no ambiente Cloudflare publicado e segue pendente.
 
@@ -162,10 +172,10 @@ Runbook completo em [docs/operations/deploy.md](docs/operations/deploy.md). A pu
 ## Limitações conhecidas desta etapa
 
 - Passkey real foi validada no Chromium com autenticador virtual; Safari/iOS, Firefox com autenticador de plataforma e dispositivos físicos seguem pendentes de validação humana.
-- `pos_vid` ainda não é usado; quando existir será dado complementar, com IP confiável e hashes com salt ([ADR-0012](docs/decisions/0012-invariantes-operacionais-de-auth.md)).
+- `pos_vid` é usado como parte do subject CSRF anônimo e é inicializado no contexto comum da API; continua sendo dado complementar, sem IP puro ([ADR-0012](docs/decisions/0012-invariantes-operacionais-de-auth.md)).
 - Runbooks operacionais em `docs/operations/`, mas sem endpoints administrativos auditados.
 - Backup/restauração lógicos funcionam e foram testados em banco isolado; não há backup automático em R2 nem monitoramento de cotas remotas.
-- Fora da vertical slice: CRUD de objetivos/projetos/tarefas, finanças, saúde e demais módulos. Estudos já tem registro real de cursos/sessões; gráficos e recomendações não existem.
+- Fora das vertical slices: finanças, saúde, treino, leitura, bem-estar e demais módulos. Há registro real de Estudos, Objetivos, Projetos/Tarefas, revisões semanais e planejamento estratégico; gráficos ECharts são carregados sob demanda. Não há recomendações executadas, tempo de tarefa observado ou IA externa habilitada.
 - Testes de navegador cobrem deep links, headers, PWA/offline, responsividade de 360–1920 px e foco/teclado, mas não substituem conferência visual humana antes da aprovação final.
 - PWA instalável com precache somente do shell; nenhuma resposta de API é cacheada e não há escrita offline.
 - `npm run deploy` está preparado e passou em `--dry-run`, mas não foi validado contra a Cloudflare remota.

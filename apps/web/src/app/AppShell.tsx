@@ -1,11 +1,11 @@
 import type { UserDto } from '@personal-os/shared';
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { Icon } from '@/components/icons';
 import { Button } from '@/components/ui/button';
 import {
   findNavigationItem,
-  isPathActive,
+  isCurrentNavigationItem,
   NAVIGATION_GROUPS,
   type NavigationItem,
 } from '@/lib/navigation';
@@ -35,7 +35,7 @@ function NavigationLinks({
           </p>
           <ul className="mt-2 space-y-1">
             {group.items.map((item: NavigationItem) => {
-              const active = isPathActive(location.pathname, item.path);
+              const active = isCurrentNavigationItem(location.pathname, item);
               return (
                 <li key={item.key}>
                   <NavLink
@@ -83,11 +83,15 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
   const sidebar = useRef<HTMLElement>(null);
   const current = findNavigationItem(location.pathname);
 
-  function closeMenu() {
+  const closeMenu = useCallback(() => {
     setMenuOpen(false);
+  }, []);
+
+  const closeMenuAndRestoreFocus = useCallback(() => {
+    closeMenu();
     // Devolve o foco depois de o drawer ser removido do DOM.
     requestAnimationFrame(() => trigger.current?.focus());
-  }
+  }, [closeMenu]);
 
   // Fechar o drawer também no back/forward do navegador.
   /* eslint-disable react-hooks/set-state-in-effect -- reação a mudança de rota */
@@ -107,7 +111,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
-        closeMenu();
+        closeMenuAndRestoreFocus();
         return;
       }
       if (event.key !== 'Tab' || container === null) return;
@@ -126,7 +130,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
       if (shell) shell.inert = false;
       if (side) side.inert = false;
     };
-  }, [menuOpen]);
+  }, [menuOpen, closeMenuAndRestoreFocus]);
 
   const firstName = user.displayName.trim().split(/\s+/u)[0] || user.displayName;
 
@@ -143,7 +147,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-dvh bg-background text-foreground">
+    <div className="min-h-dvh overflow-x-hidden bg-background text-foreground">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:text-primary-foreground"
@@ -229,7 +233,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
             type="button"
             aria-label="Fechar navegação"
             className="absolute inset-0 bg-black/70"
-            onClick={closeMenu}
+            onClick={closeMenuAndRestoreFocus}
           />
           <div
             ref={dialog}
@@ -258,7 +262,7 @@ export function AppShell({ user, children, onSignOut }: AppShellProps) {
                 size="icon"
                 className="min-h-11 min-w-11"
                 aria-label="Fechar navegação"
-                onClick={closeMenu}
+                onClick={closeMenuAndRestoreFocus}
               >
                 <Icon name="close" size={20} />
               </Button>

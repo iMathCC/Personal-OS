@@ -44,5 +44,6 @@ Thumbs.db
 !.vscode/settings.json
 
 # Logs
+.autonomous/
 *.log
 npm-debug.log*

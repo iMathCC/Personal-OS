@@ -5,10 +5,14 @@ import {
   BACKUP_TABLES,
   EXCLUDED_TABLES,
   appliedMigrations,
+  countDrift,
+  integrityReport,
   requireFile,
   resolveConfig,
   sha256,
   tableCounts,
+  tableSetDifferences,
+  userTables,
   wrangler,
 } from './lib/d1-ops.mjs';
 
@@ -30,15 +34,27 @@ function parseArgs(argv) {
   return args;
 }
 
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
 const args = parseArgs(process.argv.slice(2));
 const configPath = resolveConfig(args.config);
 requireFile(configPath, 'Configuração do Wrangler');
+
+// O allowlist precisa cobrir exatamente o schema atual antes de qualquer export.
+const actualTables = userTables({ configPath, mode: args.mode });
+const coverage = tableSetDifferences(actualTables);
+assert(
+  coverage.missing.length === 0 && coverage.unknown.length === 0,
+  `Allowlist incompleto: tabelas ausentes no banco: ${coverage.missing.join(', ') || 'nenhuma'}; tabelas desconhecidas no banco: ${coverage.unknown.join(', ') || 'nenhuma'}.`,
+);
+const countsBefore = tableCounts({ configPath, mode: args.mode });
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const outputDir = resolve(process.cwd(), args.out ?? `backups/d1-${stamp}`);
 mkdirSync(outputDir, { recursive: true });
 
-const counts = tableCounts({ configPath, mode: args.mode });
 const dataPath = resolve(outputDir, 'data.sql');
 const schemaPath = resolve(outputDir, 'schema.sql');
 
@@ -60,15 +76,36 @@ wrangler(['d1', 'export', 'DB', '--no-data', '--output', schemaPath], {
   confirmFlag: '--skip-confirmation',
 });
 
+const countsAfter = tableCounts({ configPath, mode: args.mode });
+const drift = countDrift(countsBefore, countsAfter, BACKUP_TABLES);
+assert(
+  drift.length === 0,
+  `Drift de contagens durante a exportação: ${drift.map(({ table, before, after }) => `${table} (${before} → ${after})`).join(', ')}.`,
+);
+
+const integrity = integrityReport({ configPath, mode: args.mode });
+assert(integrity.violations === 0, 'Integridade referencial quebrada na origem; não exportar.');
+assert(
+  integrity.integrityCheck.length > 0 &&
+    integrity.integrityCheck.every((result) => result === 'ok'),
+  `PRAGMA integrity_check falhou na origem: ${integrity.integrityCheck.join(', ')}.`,
+);
+
 const manifest = {
   backupVersion: 1,
   generatedAt: new Date().toISOString(),
   database: 'DB',
   mode: args.mode,
   config: args.config ?? 'apps/api/wrangler.local.toml',
-  tables: BACKUP_TABLES.map((name) => ({ name, rows: counts[name] })),
+  tables: BACKUP_TABLES.map((name) => ({ name, rows: countsAfter[name] })),
+  rowCounts: { before: countsBefore, after: countsAfter },
+  userTables: coverage.actual,
   excludedTables: EXCLUDED_TABLES,
   appliedMigrations: appliedMigrations({ configPath, mode: args.mode }),
+  schemaFingerprints: integrity.schemaFingerprints,
+  integrityCheck: integrity.integrityCheck,
+  integrityCheckStrategy: integrity.integrityCheckStrategy,
+  integrityCheckNote: integrity.integrityCheckNote,
   files: {
     'data.sql': { bytes: statSync(dataPath).size, sha256: sha256(dataPath) },
     'schema.sql': { bytes: statSync(schemaPath).size, sha256: sha256(schemaPath) },
@@ -78,12 +115,17 @@ const manifest = {
 const manifestPath = resolve(outputDir, 'manifest.json');
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
-// Verificação imediata: o checksum registrado precisa corresponder ao arquivo final.
-if (sha256(dataPath) !== manifest.files['data.sql'].sha256) {
-  throw new Error('Falha na verificação do backup: checksum de data.sql diverge.');
-}
+// Verificação imediata: os checksums registrados precisam corresponder aos arquivos finais.
+assert(
+  sha256(dataPath) === manifest.files['data.sql'].sha256,
+  'Falha na verificação do backup: checksum de data.sql diverge.',
+);
+assert(
+  sha256(schemaPath) === manifest.files['schema.sql'].sha256,
+  'Falha na verificação do backup: checksum de schema.sql diverge.',
+);
 
-const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+const total = Object.values(countsAfter).reduce((sum, value) => sum + value, 0);
 console.log(`Backup criado em ${outputDir}`);
 console.log(`Tabelas: ${BACKUP_TABLES.length} | linhas: ${total}`);
 console.log(`Migrations: ${manifest.appliedMigrations.join(', ') || 'nenhuma'}`);

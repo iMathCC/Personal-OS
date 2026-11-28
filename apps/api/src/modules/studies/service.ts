@@ -4,16 +4,19 @@ import {
   auditStatement,
   findCourseById,
   findMetricByKey,
+  findStudyGoalByTitle,
   findObservationById,
   findStudySessionById,
-  findUser,
   insertCourseStatement,
   insertEventStatement,
+  insertGoalMetricStatement,
+  insertGoalStatement,
   insertObservationStatement,
   insertStudySessionStatement,
   listActiveObservationsForMetric,
   listCourses,
   listObservationsForSession,
+  listStudyGoals,
   listStudySessions,
   newId,
   softDeleteSessionStatement,
@@ -21,31 +24,43 @@ import {
   type CourseRow,
   type Database,
   type ObservationRow,
+  type StudyGoalRow,
   type StudySessionRow,
 } from '@personal-os/db';
 import {
   assertDateRange,
   assertIanaTimezone,
+  buildCourseBreakdown,
   buildDailySeries,
   buildWeeklySeries,
   businessRule,
+  calculateGoalProgress,
+  compareStudyPeriods,
   conflict,
+  dayCount,
   decodeCursor,
   DEFAULT_PAGE_SIZE,
+  GOAL_PROGRESS_ALGORITHM,
   localDateFor,
   makeCursor,
   MAX_PAGE_SIZE,
   notFound,
+  shiftLocalDate,
   STUDY_MINUTES_ALGORITHM,
   STUDY_MINUTES_METRIC_KEY,
   STUDY_MINUTES_SOURCE_ID,
   summarizeStudyMinutes,
+  validationError,
   type DateRange,
+  type GoalProgressInput,
 } from '@personal-os/domain';
+import { studyEventTitle } from '@personal-os/shared';
 import type {
   CourseDto,
   CreateCourseRequest,
+  CreateGoalRequest,
   CreateStudySessionRequest,
+  GoalDto,
   ListSessionsQuery,
   ObservationDto,
   SeriesQuery,
@@ -57,6 +72,8 @@ import { executeIdempotent, type IdempotentResult } from '../operations/idempote
 /** Área de Estudos criada pelo seed; ID fixo documentado no DATA_MODEL. */
 const STUDIES_AREA_ID = '01a1fb52-074d-7043-a390-78a0731bdb52';
 const MANUAL_SOURCE_ID = 'src_manual';
+/** Teto de observações processadas por consulta; compatível com D1 Free. */
+const STUDY_SAMPLE_LIMIT = 10_000;
 
 export interface StudiesContext {
   db: Database;
@@ -82,15 +99,15 @@ function envelope<T>(requestId: string, data: T): string {
 }
 
 /**
- * Snapshot de auditoria: apenas campos estruturados. Texto livre (notas,
- * descrição, motivo) fica fora do `audit_log` por política de segurança.
+ * Snapshot de auditoria: campos estruturados e um `title` limitado, usado pela
+ * linha do tempo. Notas, descrição e motivo ficam fora do `audit_log`.
  * Chaves nullable aparecem explicitamente: `null` ≠ ausente.
  */
 function sessionSnapshot(row: StudySessionRow | StudySessionDto) {
   return {
     id: row.id,
     courseId: row.courseId ?? null,
-    topic: row.topic,
+    title: row.topic,
     startedAt: row.startedAt,
     localDate: row.localDate,
     timezone: row.timezone,
@@ -242,6 +259,99 @@ export async function createCourse(
   });
 }
 
+export async function createGoal(
+  ctx: StudiesContext,
+  request: MutatingRequest,
+  input: CreateGoalRequest,
+): Promise<IdempotentResult> {
+  if (input.startDate == null || input.targetDate == null) {
+    throw validationError('Meta exige data de início e data-alvo.');
+  }
+  if (input.targetDate < input.startDate) {
+    throw validationError('A data-alvo não pode anteceder o início.');
+  }
+  const metric = await findMetricByKey(ctx.db, STUDY_MINUTES_METRIC_KEY);
+  if (metric === undefined) throw notFound('Métrica study_minutes não encontrada.');
+
+  return executeIdempotent(
+    {
+      ...mutationContext(ctx, request),
+      validate: async () => {
+        const existing = await findStudyGoalByTitle(ctx.db, STUDIES_AREA_ID, input.title);
+        if (existing !== undefined) throw conflict('Já existe uma meta com este título.');
+      },
+    },
+    ({ opId, now }) => {
+      const id = newId();
+      const dto: GoalDto = {
+        id,
+        title: input.title,
+        horizon: input.horizon,
+        status: input.status,
+        priority: input.priority,
+        startDate: input.startDate ?? null,
+        targetDate: input.targetDate ?? null,
+        targetMinutes: input.targetMinutes,
+        progress: {
+          percent: null,
+          basis: 'unavailable',
+          algorithmVersion: null,
+          achieved: false,
+          truncated: false,
+        },
+        progressSeries: [],
+        sourceId: MANUAL_SOURCE_ID,
+        version: 1,
+        createdAt: now,
+      };
+      return {
+        status: 201,
+        bodyJson: envelope(ctx.requestId, dto),
+        statements: [
+          insertGoalStatement({
+            id,
+            title: input.title,
+            horizon: input.horizon,
+            status: input.status,
+            priority: input.priority,
+            startDate: dto.startDate,
+            targetDate: dto.targetDate,
+            sourceId: MANUAL_SOURCE_ID,
+            opId,
+            now,
+          }),
+          insertGoalMetricStatement({
+            goalId: id,
+            metricId: metric.id,
+            targetMinutes: input.targetMinutes,
+            now,
+          }),
+          auditStatement({
+            entityType: 'goal',
+            entityId: id,
+            action: 'create',
+            actorType: 'user',
+            actorId: ctx.subject,
+            afterJson: JSON.stringify({
+              id,
+              title: input.title,
+              horizon: input.horizon,
+              status: input.status,
+              priority: input.priority,
+              startDate: dto.startDate,
+              targetDate: dto.targetDate,
+              targetMinutes: input.targetMinutes,
+              version: 1,
+            }),
+            requestId: ctx.requestId,
+            ipHash: ctx.ipHash,
+          }),
+        ],
+      };
+    },
+  );
+}
+
 export async function createStudySession(
   ctx: StudiesContext,
   request: MutatingRequest,
@@ -330,7 +440,7 @@ export async function createStudySession(
           areaId: STUDIES_AREA_ID,
           courseId: dto.courseId,
           studySessionId: sessionId,
-          title: `Estudo: ${input.topic}`,
+          title: studyEventTitle(input.topic),
           occurredAt: input.startedAt,
           localDate,
           timezone,
@@ -579,45 +689,269 @@ export async function getObservationsForSession(ctx: StudiesContext, id: string)
   return observations.map(observationToDto);
 }
 
-async function samplesFor(ctx: StudiesContext, range: DateRange) {
+interface StudySample {
+  localDate: string;
+  valueNum: number;
+  courseId: string | null;
+}
+
+/**
+ * Busca `limit + 1` linhas para detectar corte sem uma `COUNT(*)` adicional
+ * (o dashboard já opera no limite de 8 queries). A linha extra nunca é
+ * processada: o orçamento de cpu continua sobre 10.000 amostras.
+ */
+export function splitTruncatedRows(
+  rows: readonly { localDate: string; valueNum: number; courseId: string | null }[],
+  limit = STUDY_SAMPLE_LIMIT,
+): { samples: StudySample[]; truncated: boolean } {
+  return {
+    samples: rows.slice(0, limit).map((row) => ({
+      localDate: row.localDate,
+      valueNum: row.valueNum,
+      courseId: row.courseId,
+    })),
+    truncated: rows.length > limit,
+  };
+}
+
+async function loadSamples(
+  ctx: StudiesContext,
+  metricId: string,
+  from: string,
+  to: string,
+  courseId?: string,
+): Promise<{ samples: StudySample[]; truncated: boolean }> {
+  const rows = await listActiveObservationsForMetric(
+    ctx.db,
+    metricId,
+    from,
+    to,
+    STUDY_SAMPLE_LIMIT + 1,
+    courseId,
+  );
+  return splitTruncatedRows(rows);
+}
+
+async function samplesFor(
+  ctx: StudiesContext,
+  range: DateRange,
+  courseId?: string,
+): Promise<{
+  metricId: string;
+  metricKey: string;
+  unit: string;
+  samples: StudySample[];
+  truncated: boolean;
+}> {
   const metric = await findMetricByKey(ctx.db, STUDY_MINUTES_METRIC_KEY);
   if (metric === undefined) throw notFound('Métrica study_minutes não encontrada.');
-  const rows = await listActiveObservationsForMetric(ctx.db, metric.id, range.from, range.to);
+  const { samples, truncated } = await loadSamples(ctx, metric.id, range.from, range.to, courseId);
   return {
-    metric,
-    samples: rows.map((row) => ({ localDate: row.localDate, valueNum: row.valueNum })),
+    metricId: metric.id,
+    metricKey: metric.key,
+    unit: metric.unit,
+    samples,
+    truncated,
+  };
+}
+
+function samplesInRange(samples: readonly StudySample[], range: DateRange): StudySample[] {
+  return samples.filter((sample) => sample.localDate >= range.from && sample.localDate <= range.to);
+}
+
+function goalRange(goal: StudyGoalRow): DateRange {
+  if (goal.startDate === null || goal.targetDate === null) {
+    throw businessRule('Meta sem período definido.');
+  }
+  return assertDateRange({ from: goal.startDate, to: goal.targetDate });
+}
+
+/** Busca o maior intervalo necessário para cobrir o painel e todas as metas. */
+function fetchRangeFor(range: DateRange, goals: readonly StudyGoalRow[]): DateRange {
+  let from = range.from;
+  let to = range.to;
+  for (const goal of goals) {
+    if (goal.startDate === null || goal.targetDate === null) continue;
+    if (goal.startDate < from) from = goal.startDate;
+    if (goal.targetDate > to) to = goal.targetDate;
+  }
+  return { from, to };
+}
+
+function isGoalHorizon(value: string): value is GoalDto['horizon'] {
+  return value === 'short' || value === 'medium' || value === 'long';
+}
+
+function isGoalStatus(value: string): value is GoalDto['status'] {
+  return (
+    value === 'draft' ||
+    value === 'active' ||
+    value === 'paused' ||
+    value === 'achieved' ||
+    value === 'cancelled'
+  );
+}
+
+function goalToDto(
+  goal: StudyGoalRow,
+  samples: readonly StudySample[],
+  window: DateRange,
+  truncated: boolean,
+): GoalDto {
+  const range = goalRange(goal);
+  const goalSamples = samplesInRange(samples, range);
+  // Ausência de observação é "sem dados", não zero minutos acumulados.
+  const currentValue =
+    goalSamples.length === 0 ? null : goalSamples.reduce((sum, sample) => sum + sample.valueNum, 0);
+  const status = isGoalStatus(goal.status) ? goal.status : 'draft';
+  const progressInput: GoalProgressInput = {
+    progressMode:
+      goal.progressMode === 'manual' ||
+      goal.progressMode === 'metrics' ||
+      goal.progressMode === 'hybrid' ||
+      goal.progressMode === 'tasks'
+        ? goal.progressMode
+        : 'metrics',
+    manualProgress: goal.manualProgress,
+    status,
+    metrics: [
+      {
+        baselineValue: 0,
+        targetValue: goal.targetMinutes,
+        direction: 'increase',
+        currentValue,
+      },
+    ],
+  };
+  const progress = { ...calculateGoalProgress(progressInput), truncated };
+  const seriesFrom = range.from > window.from ? range.from : window.from;
+  const seriesTo = range.to < window.to ? range.to : window.to;
+  const progressSeries =
+    seriesFrom <= seriesTo ? buildDailySeries(goalSamples, { from: seriesFrom, to: seriesTo }) : [];
+  return {
+    id: goal.id,
+    title: goal.title,
+    horizon: isGoalHorizon(goal.horizon) ? goal.horizon : 'medium',
+    status,
+    priority: goal.priority,
+    startDate: goal.startDate,
+    targetDate: goal.targetDate,
+    targetMinutes: goal.targetMinutes,
+    progress,
+    progressSeries,
+    sourceId: goal.sourceId,
+    version: goal.version,
+    createdAt: goal.createdAt,
   };
 }
 
 export async function getSeries(ctx: StudiesContext, query: SeriesQuery) {
   const range = assertDateRange({ from: query.from, to: query.to });
+  if (
+    query.courseId !== undefined &&
+    (await findCourseById(ctx.db, query.courseId)) === undefined
+  ) {
+    throw notFound('Curso não encontrado.');
+  }
   const granularity = query.granularity ?? 'day';
-  const { metric, samples } = await samplesFor(ctx, range);
+  const { metricKey, unit, samples, truncated } = await samplesFor(ctx, range, query.courseId);
   const points =
     granularity === 'week' ? buildWeeklySeries(samples, range) : buildDailySeries(samples, range);
   return {
-    metricKey: metric.key,
-    unit: metric.unit,
+    metricKey,
+    unit,
     granularity,
     points,
     algorithmVersion: STUDY_MINUTES_ALGORITHM,
     timezone: ctx.timezone,
+    truncated,
   };
 }
 
-export async function getDashboard(ctx: StudiesContext, query: { from: string; to: string }) {
+export async function listGoals(
+  ctx: StudiesContext,
+  query: { from: string; to: string },
+): Promise<GoalDto[]> {
+  const range = assertDateRange(query);
+  const metric = await findMetricByKey(ctx.db, STUDY_MINUTES_METRIC_KEY);
+  if (metric === undefined) throw notFound('Métrica study_minutes não encontrada.');
+  const goals = await listStudyGoals(ctx.db, STUDIES_AREA_ID);
+  const fetchRange = fetchRangeFor(range, goals);
+  const { samples, truncated } = await loadSamples(ctx, metric.id, fetchRange.from, fetchRange.to);
+  return goals.map((goal) => goalToDto(goal, samples, range, truncated));
+}
+
+export async function getDashboard(
+  ctx: StudiesContext,
+  query: { from: string; to: string; courseId?: string },
+) {
   const range = assertDateRange({ from: query.from, to: query.to });
-  const { samples } = await samplesFor(ctx, range);
-  return {
-    period: { from: range.from, to: range.to, timezone: ctx.timezone },
-    summary: summarizeStudyMinutes(samples),
-    series: buildDailySeries(samples, range),
-    generatedAt: ctx.now,
-  };
-}
+  if (
+    query.courseId !== undefined &&
+    (await findCourseById(ctx.db, query.courseId)) === undefined
+  ) {
+    throw notFound('Curso não encontrado.');
+  }
+  const metric = await findMetricByKey(ctx.db, STUDY_MINUTES_METRIC_KEY);
+  if (metric === undefined) throw notFound('Métrica study_minutes não encontrada.');
+  const goals = await listStudyGoals(ctx.db, STUDIES_AREA_ID);
+  const previousTo = shiftLocalDate(range.from, -1);
+  const previousFrom = shiftLocalDate(previousTo, -(dayCount(range.from, range.to) - 1));
+  const fetchRange = fetchRangeFor({ from: previousFrom, to: range.to }, goals);
+  const { samples, truncated } = await loadSamples(
+    ctx,
+    metric.id,
+    fetchRange.from,
+    fetchRange.to,
+    query.courseId,
+  );
+  const currentSamples = samplesInRange(samples, range);
+  const previousSamples = samplesInRange(samples, { from: previousFrom, to: previousTo });
+  // Metas pertencem à área, não ao curso: o filtro do painel não pode alterar
+  // o progresso exibido. Só consulta novamente quando há filtro ativo.
+  const goalResult =
+    query.courseId === undefined
+      ? { samples, truncated }
+      : await loadSamples(ctx, metric.id, fetchRange.from, fetchRange.to);
+  const courses = await listCourses(ctx.db);
+  const titles = new Map(courses.map((course) => [course.id, course.title]));
+  const byCourse = buildCourseBreakdown(
+    currentSamples.map((sample) => ({
+      courseId: sample.courseId,
+      minutes: sample.valueNum,
+      sessionCount: 1,
+    })),
+  ).map((row) => ({
+    ...row,
+    title: row.courseId === null ? null : (titles.get(row.courseId) ?? null),
+  }));
+  const currentSummary = summarizeStudyMinutes(currentSamples);
+  const comparison = compareStudyPeriods(currentSummary, summarizeStudyMinutes(previousSamples));
 
-/** Usuário da instalação: fonte do fuso usado em `timezone` nas respostas. */
-export async function currentTimezone(db: Database): Promise<string> {
-  const user = await findUser(db);
-  return user?.timezone ?? 'UTC';
+  return {
+    period: {
+      from: range.from,
+      to: range.to,
+      previousFrom,
+      previousTo,
+      timezone: ctx.timezone,
+    },
+    summary: currentSummary,
+    series: buildDailySeries(currentSamples, range),
+    byCourse,
+    // DTO allowlist: o domínio também devolve os resumos completos, que não
+    // fazem parte do contrato público do dashboard.
+    comparison: {
+      totalMinutes: comparison.totalMinutes,
+      sessionCount: comparison.sessionCount,
+      daysStudied: comparison.daysStudied,
+    },
+    goals: goals.map((goal) => goalToDto(goal, goalResult.samples, range, goalResult.truncated)),
+    algorithms: {
+      studyMinutes: STUDY_MINUTES_ALGORITHM,
+      goalProgress: GOAL_PROGRESS_ALGORITHM,
+    },
+    generatedAt: ctx.now,
+    truncated: truncated || goalResult.truncated,
+  };
 }
