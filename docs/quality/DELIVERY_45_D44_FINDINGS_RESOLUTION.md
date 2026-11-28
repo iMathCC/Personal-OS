@@ -7,8 +7,8 @@
 | PR | #1 open, não mergeado | #1 open, não mergeado (atualização pendente de push/CI nesta entrega) |
 | Branch | `release/d35-d40-curated-20261128` | mesma branch (commits D45 adicionados, sem force-push/rebase) |
 | Base | `9794b82911e3afd89199cf2aa08ad2b9aa8ae610` | inalterada |
-| SHA head inicial | `0d99049a19c6c1ba244021cc9b591e80b672e63c` | a preencher após commit/push D45 |
-| CI remoto inicial | PASS (run 46127142264) | a preencher após push D45 |
+| SHA head inicial | `0d99049a19c6c1ba244021cc9b591e80b672e63c` | `5ccfa0ad08c6c7d32d8c8d1978e300f0ed3df970` |
+| CI remoto inicial | PASS (run 46127142264) | PASS (run 46131957354, commit D45) |
 | Comentários/reviews externos (checagem inicial) | 0 comentários, 0 reviews | não sobrescritos; sem merge |
 
 ## 2. Ambiente e proteções
@@ -88,14 +88,15 @@
 
 ## 7. Resultado do CI remoto
 
-Pendente (push + aguardar checks do PR #1). Não presumir PASS.
+- CI `CI` (GitHub Actions) para commit `5ccfa0ad08c6c7d32d8c8d1978e300f0ed3df970`: **PASS** (success) — https://github.com/iMathCC/Personal-OS/actions/runs/46131957354
+- PR #1 atualizado com comentário D45: https://github.com/iMathCC/Personal-OS/pull/1#issuecomment-7237450005
 
 ## 8. Riscos restantes
 
-- CI remoto ainda não executado para o SHA D45.
+- CI remoto do commit D45: PASS; monitorar apenas regressões futuras.
 - `deploy:check`/produção continuam bloqueados por `wrangler.production.toml` real e autorização.
 - Guard de concorrência usa CHECK em `rate_limits`; mapeamento é específico mas depende da mensagem de constraint do SQLite/D1. Coberto por testes.
-- Não foram executados testes completos de todo o monorepo nesta etapa do relatório inicial; atualizar antes do push final.
+- `npm test` completo do monorepo PASS (domain/web/api); `test:integration` PASS. E2E observations/daily-flow não executado para preservar `localhost:8788`.
 
 ## 9. Preservação de ambientes
 
@@ -112,3 +113,12 @@ Confirmado: sem merge, sem deploy, sem migração D1 remota, sem escrita D1/R2 r
 
 - Se CI remoto D45 ficar verde: **autorizar explicitamente o merge do PR #1** (não executar merge sem autorização).
 - Após merge/autorização separada: tratar deploy/migração remota/configuração de produção como etapas controladas com credenciais/autorização explícita.
+
+## 12. Classificação final
+
+- D44-001: RESOLVED
+- D44-002: RESOLVED
+- D44-003: RESOLVED
+- D44-004: RESOLVED
+
+**Classificação final: `ALL_D44_FINDINGS_RESOLVED — CI PASS`**
